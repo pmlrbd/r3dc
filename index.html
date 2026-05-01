@@ -1,1152 +1,1692 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>R³DC — Reliability-Guided Depth Completion</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Serif+Display:ital@0;1&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>R³DC: Reliability-Guided Reveal-to-Revise Depth Completion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #07090f;
-    --bg2: #0d1017;
-    --bg3: #111520;
-    --surface: #161b28;
-    --surface2: #1e2535;
-    --border: rgba(94,140,255,0.13);
-    --cyan: #3deaff;
-    --cyan2: #00c8e8;
-    --gold: #f0c060;
-    --lavender: #a78bfa;
-    --green: #34d399;
-    --text: #e8edf8;
-    --text2: #8b96b0;
-    --text3: #5a6380;
-    --accent: #3deaff;
-    --glow: rgba(61,234,255,0.18);
-  }
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #03060f;
+  --bg2: #070d1a;
+  --surface: #0d1628;
+  --surface2: #131f35;
+  --border: rgba(0,220,200,0.12);
+  --cyan: #00dcc8;
+  --cyan2: #00b8a8;
+  --orange: #ff7a35;
+  --gold: #f5c842;
+  --red: #ff4560;
+  --green: #29e89c;
+  --blue: #4d9fff;
+  --text: #d4e8f0;
+  --text2: #7fa8c0;
+  --text3: #4a6f88;
+  --font-display: 'Syne', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-code: 'Space Mono', monospace;
+}
 
-  html { scroll-behavior: smooth; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    overflow-x: hidden;
-    cursor: default;
-  }
+html { scroll-behavior: smooth; }
 
-  /* ── BACKGROUND GRID ── */
-  body::before {
-    content: '';
-    position: fixed; inset: 0;
-    background-image:
-      linear-gradient(rgba(61,234,255,0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(61,234,255,0.025) 1px, transparent 1px);
-    background-size: 60px 60px;
-    pointer-events: none;
-    z-index: 0;
-  }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-x: hidden;
+}
 
-  /* ── NOISE OVERLAY ── */
-  body::after {
-    content: '';
-    position: fixed; inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-    pointer-events: none; z-index: 0; opacity: .4;
-  }
+/* ── CANVAS BG ── */
+#hero-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; opacity: 0.45;
+}
 
-  /* ── NAV ── */
-  nav {
-    position: fixed; top: 0; left: 0; right: 0;
-    z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 3rem;
-    height: 64px;
-    background: rgba(7,9,15,0.82);
-    backdrop-filter: blur(18px);
-    border-bottom: 1px solid var(--border);
-  }
-  .nav-logo {
-    font-family: 'Space Mono', monospace;
-    font-size: 1.05rem;
-    color: var(--cyan);
-    letter-spacing: .04em;
-    text-decoration: none;
-  }
-  .nav-links { display: flex; gap: 2rem; }
-  .nav-links a {
-    font-size: .8rem; font-weight: 600; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--text2);
-    text-decoration: none; transition: color .2s;
-  }
-  .nav-links a:hover { color: var(--cyan); }
+/* ── NAV ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 2.5rem; height: 56px;
+  background: rgba(3,6,15,0.85);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-logo {
+  font-family: var(--font-code); font-weight: 700; font-size: 1.05rem;
+  color: var(--cyan); letter-spacing: 0.08em;
+}
+.nav-links { display: flex; gap: 1.8rem; }
+.nav-links a {
+  font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600;
+  color: var(--text2); text-decoration: none; letter-spacing: 0.1em;
+  text-transform: uppercase; transition: color .25s;
+}
+.nav-links a:hover { color: var(--cyan); }
 
-  /* ── WRAPPER ── */
-  .container { max-width: 1100px; margin: 0 auto; padding: 0 2rem; position: relative; z-index: 1; }
+/* ── HERO ── */
+#hero {
+  position: relative; min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; overflow: hidden;
+  padding: 7rem 2rem 5rem;
+}
 
-  /* ── HERO ── */
-  #hero {
-    min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    text-align: center;
-    padding: 120px 2rem 80px;
-    position: relative;
-  }
-  .hero-glow {
-    position: absolute;
-    width: 700px; height: 700px;
-    background: radial-gradient(ellipse, rgba(61,234,255,0.07) 0%, transparent 70%);
-    top: 50%; left: 50%; transform: translate(-50%,-50%);
-    pointer-events: none;
-  }
-  .conference-badge {
-    display: inline-flex; align-items: center; gap: .5rem;
-    background: rgba(61,234,255,0.07);
-    border: 1px solid rgba(61,234,255,0.25);
-    border-radius: 100px;
-    padding: .35rem 1.1rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--cyan);
-    margin-bottom: 2rem;
-    animation: fadeUp .8s ease both;
-  }
-  .conference-badge::before {
-    content: ''; width: 6px; height: 6px; border-radius: 50%;
-    background: var(--cyan);
-    box-shadow: 0 0 8px var(--cyan);
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+.venue-badge {
+  display: inline-flex; align-items: center; gap: .55rem;
+  background: rgba(0,220,200,0.08);
+  border: 1px solid rgba(0,220,200,0.25);
+  border-radius: 4px;
+  padding: .4rem 1.1rem;
+  font-size: .75rem; font-weight: 700;
+  letter-spacing: .15em; text-transform: uppercase;
+  color: var(--cyan); margin-bottom: 2rem;
+  animation: fadeDown .8s ease both;
+}
+.venue-badge::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--cyan); box-shadow: 0 0 8px var(--cyan);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-  h1.hero-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(2.8rem, 6vw, 5.2rem);
-    line-height: 1.08;
-    letter-spacing: -.02em;
-    color: var(--text);
-    margin-bottom: 1.2rem;
-    animation: fadeUp .8s .1s ease both;
-  }
-  h1.hero-title span.accent { color: var(--cyan); font-style: italic; }
-  h1.hero-title sup {
-    font-size: .45em;
-    color: var(--cyan);
-    vertical-align: super;
-    font-style: normal;
-  }
+h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 5.5vw, 4.2rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  max-width: 900px;
+  animation: fadeDown .9s .1s ease both;
+}
+h1 sup { font-size: .55em; color: var(--cyan); }
 
-  .hero-subtitle {
-    font-size: 1.05rem; font-weight: 400; color: var(--text2);
-    max-width: 680px; margin: 0 auto 2.5rem;
-    line-height: 1.7;
-    animation: fadeUp .8s .2s ease both;
-  }
+.subtitle {
+  margin-top: 1.2rem; font-size: clamp(.85rem,1.6vw,1.05rem);
+  color: var(--text2); max-width: 700px; line-height: 1.65;
+  animation: fadeDown .9s .2s ease both;
+}
 
-  .authors {
-    font-size: .9rem; color: var(--text2); margin-bottom: .6rem;
-    animation: fadeUp .8s .3s ease both;
-  }
-  .authors strong { color: var(--text); }
-  .institution {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .75rem; color: var(--text3); letter-spacing: .05em;
-    margin-bottom: 2.8rem;
-    animation: fadeUp .8s .35s ease both;
-  }
+.authors {
+  margin-top: 2rem;
+  font-family: var(--font-mono); font-size: .88rem;
+  color: var(--text2); animation: fadeDown .9s .3s ease both;
+}
+.authors strong { color: var(--text); }
+.affil { font-size: .78rem; color: var(--text3); margin-top: .35rem; }
 
-  .hero-btns {
-    display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;
-    animation: fadeUp .8s .45s ease both;
-    margin-bottom: 4rem;
-  }
-  .btn {
-    display: inline-flex; align-items: center; gap: .5rem;
-    padding: .7rem 1.7rem;
-    border-radius: 8px;
-    font-family: 'Syne', sans-serif;
-    font-size: .82rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-    text-decoration: none;
-    transition: all .2s;
-    cursor: pointer; border: none;
-  }
-  .btn-primary {
-    background: var(--cyan);
-    color: #07090f;
-    box-shadow: 0 0 24px rgba(61,234,255,0.3);
-  }
-  .btn-primary:hover { background: #fff; box-shadow: 0 0 36px rgba(61,234,255,0.5); transform: translateY(-1px); }
-  .btn-secondary {
-    background: transparent;
-    color: var(--cyan);
-    border: 1px solid rgba(61,234,255,0.35);
-  }
-  .btn-secondary:hover { background: rgba(61,234,255,0.07); border-color: var(--cyan); transform: translateY(-1px); }
+.hero-buttons {
+  margin-top: 2.5rem; display: flex; gap: 1rem; flex-wrap: wrap;
+  justify-content: center; animation: fadeDown .9s .4s ease both;
+}
+.btn {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .7rem 1.8rem;
+  font-family: var(--font-code); font-size: .82rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  text-decoration: none; border-radius: 4px;
+  transition: all .25s; cursor: pointer; border: none;
+}
+.btn-primary {
+  background: var(--cyan); color: var(--bg);
+}
+.btn-primary:hover { background: #00fff0; box-shadow: 0 0 24px rgba(0,220,200,.45); }
+.btn-outline {
+  background: transparent; color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+}
+.btn-outline:hover { background: rgba(0,220,200,.08); }
+.btn-orange {
+  background: transparent; color: var(--orange);
+  border: 1.5px solid var(--orange);
+}
+.btn-orange:hover { background: rgba(255,122,53,.08); }
 
-  /* ── HERO METRICS STRIP ── */
-  .metrics-strip {
-    display: flex; justify-content: center; gap: 0;
-    flex-wrap: wrap;
-    animation: fadeUp .8s .55s ease both;
-  }
-  .metric-card {
-    padding: 1.4rem 2.2rem;
-    border: 1px solid var(--border);
-    position: relative;
-    text-align: center;
-    background: rgba(22,27,40,0.6);
-    backdrop-filter: blur(8px);
-    transition: background .2s;
-  }
-  .metric-card:first-child { border-radius: 12px 0 0 12px; }
-  .metric-card:last-child { border-radius: 0 12px 12px 0; }
-  .metric-card + .metric-card { border-left: none; }
-  .metric-card:hover { background: rgba(30,37,53,0.9); }
-  .metric-val {
-    font-family: 'DM Serif Display', serif;
-    font-size: 2.1rem; color: var(--cyan);
-    line-height: 1; margin-bottom: .3rem;
-  }
-  .metric-label {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .65rem; color: var(--text3); letter-spacing: .08em; text-transform: uppercase;
-  }
-  .metric-sub { font-size: .7rem; color: var(--text3); margin-top: .15rem; }
+/* ── STATS ROW ── */
+.stats-row {
+  margin-top: 4rem; display: flex; gap: 0;
+  justify-content: center; flex-wrap: wrap;
+  animation: fadeDown .9s .5s ease both;
+}
+.stat {
+  padding: 1.4rem 2.5rem; text-align: center;
+  border-right: 1px solid var(--border);
+}
+.stat:last-child { border-right: none; }
+.stat-val {
+  font-family: var(--font-display); font-size: 2rem; font-weight: 800;
+  color: var(--cyan); display: block; line-height: 1;
+}
+.stat-label { font-size: .72rem; color: var(--text3); margin-top: .4rem; text-transform: uppercase; letter-spacing: .1em; }
 
-  /* ── SECTIONS ── */
-  section { padding: 100px 0; position: relative; z-index: 1; }
-  section + section { border-top: 1px solid var(--border); }
+/* ── SECTION ── */
+section {
+  padding: 7rem 2rem;
+  max-width: 1140px; margin: 0 auto;
+}
+section.full { max-width: 100%; padding: 7rem 0; }
 
-  .section-eyebrow {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .7rem; letter-spacing: .15em; text-transform: uppercase;
-    color: var(--cyan); margin-bottom: 1rem;
-    display: flex; align-items: center; gap: .7rem;
-  }
-  .section-eyebrow::after {
-    content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(61,234,255,0.3), transparent);
-  }
+.section-label {
+  font-family: var(--font-code); font-size: .7rem; font-weight: 700;
+  letter-spacing: .22em; text-transform: uppercase;
+  color: var(--cyan); margin-bottom: 1rem;
+}
+h2 {
+  font-family: var(--font-display); font-size: clamp(1.7rem,3.5vw,2.8rem);
+  font-weight: 800; letter-spacing: -0.02em; line-height: 1.15;
+  margin-bottom: 1.5rem;
+}
+h3 {
+  font-family: var(--font-display); font-size: 1.25rem;
+  font-weight: 700; margin-bottom: .75rem; color: var(--text);
+}
 
-  h2.section-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(2rem, 4vw, 3rem);
-    line-height: 1.15; margin-bottom: 1rem;
-  }
-  .section-desc { font-size: 1.02rem; color: var(--text2); line-height: 1.75; max-width: 680px; }
+.divider {
+  border: none; border-top: 1px solid var(--border);
+  margin: 0;
+}
 
-  /* ── ABSTRACT ── */
-  .abstract-block {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 2.5rem 3rem;
-    position: relative;
-    overflow: hidden;
-  }
-  .abstract-block::before {
-    content: '"';
-    position: absolute; top: -1rem; left: 2rem;
-    font-family: 'DM Serif Display', serif;
-    font-size: 10rem; color: rgba(61,234,255,0.05);
-    line-height: 1;
-    pointer-events: none;
-  }
-  .abstract-block p {
-    font-size: .98rem; line-height: 1.85; color: var(--text2);
-    position: relative; z-index: 1;
-  }
-  .abstract-block p strong { color: var(--text); }
+/* ── ABSTRACT ── */
+.abstract-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  border-radius: 6px;
+  padding: 2.5rem;
+  font-size: .95rem; line-height: 1.9;
+  color: var(--text2);
+}
+.abstract-card strong { color: var(--text); }
 
-  /* ── CHALLENGES ── */
-  .challenges-grid {
-    display: grid; grid-template-columns: repeat(3,1fr); gap: 1.5px;
-    background: var(--border);
-    border-radius: 16px; overflow: hidden;
-    border: 1px solid var(--border);
-    margin-top: 3rem;
-  }
-  .challenge-cell {
-    background: var(--surface);
-    padding: 2rem 1.8rem;
-    transition: background .25s;
-    position: relative;
-  }
-  .challenge-cell:hover { background: var(--surface2); }
-  .challenge-num {
-    font-family: 'DM Serif Display', serif;
-    font-size: 4rem; color: rgba(61,234,255,0.08);
-    line-height: 1; margin-bottom: .8rem;
-  }
-  .challenge-title {
-    font-size: .9rem; font-weight: 700; color: var(--cyan);
-    letter-spacing: .04em; margin-bottom: .7rem;
-  }
-  .challenge-body { font-size: .85rem; color: var(--text2); line-height: 1.65; }
+/* ── CHALLENGES ── */
+.challenges-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem;
+  margin-top: 3rem;
+}
+.challenge-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 2rem;
+  position: relative; overflow: hidden;
+  transition: border-color .3s, transform .3s;
+}
+.challenge-card:hover {
+  border-color: var(--cyan); transform: translateY(-4px);
+}
+.challenge-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.challenge-card:nth-child(1)::before { background: var(--orange); }
+.challenge-card:nth-child(2)::before { background: var(--red); }
+.challenge-card:nth-child(3)::before { background: var(--cyan); }
+.challenge-num {
+  font-family: var(--font-display); font-size: 3.5rem; font-weight: 800;
+  line-height: 1; opacity: .08; position: absolute; top: 1rem; right: 1.2rem;
+}
+.challenge-icon { font-size: 2rem; margin-bottom: 1rem; }
+.challenge-card h3 { font-size: 1rem; margin-bottom: .6rem; }
+.challenge-card p { font-size: .83rem; color: var(--text2); line-height: 1.7; }
 
-  /* ── ARCHITECTURE ── */
-  .arch-diagram {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 2.5rem;
-    margin-top: 3rem;
-    overflow-x: auto;
-  }
-  .pipeline {
-    display: flex; align-items: stretch; gap: 0;
-    min-width: 700px;
-  }
-  .pipe-stage {
-    flex: 1; padding: 1.5rem 1rem;
-    text-align: center;
-    position: relative;
-  }
-  .pipe-stage + .pipe-stage::before {
-    content: '→';
-    position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
-    color: var(--cyan); font-size: 1.3rem;
-    z-index: 2;
-  }
-  .pipe-box {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.2rem .8rem;
-    height: 100%;
-    transition: border-color .2s, box-shadow .2s;
-  }
-  .pipe-box:hover { border-color: var(--cyan); box-shadow: 0 0 20px var(--glow); }
-  .pipe-icon { font-size: 1.6rem; margin-bottom: .5rem; }
-  .pipe-name {
-    font-family: 'Space Mono', monospace;
-    font-size: .72rem; color: var(--cyan); letter-spacing: .06em;
-    font-weight: 700; margin-bottom: .5rem; text-transform: uppercase;
-  }
-  .pipe-desc { font-size: .73rem; color: var(--text3); line-height: 1.5; }
+/* ── PIPELINE ── */
+.pipeline-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3rem 2rem;
+  margin-top: 3rem;
+  overflow-x: auto;
+}
 
-  /* ── COMPONENT TAGS ── */
-  .components-row {
-    display: flex; flex-wrap: wrap; gap: .7rem;
-    margin-top: 2.5rem;
-  }
-  .comp-tag {
-    display: flex; align-items: center; gap: .5rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: .55rem 1rem;
-    font-size: .78rem; color: var(--text2);
-    transition: all .2s;
-    cursor: default;
-  }
-  .comp-tag .dot { width: 6px; height: 6px; border-radius: 50%; }
-  .comp-tag:hover { border-color: var(--cyan); color: var(--text); }
+svg.pipeline-svg { width: 100%; min-width: 780px; display: block; }
 
-  /* ── RESULTS TABLE ── */
-  .results-grid {
-    display: grid; grid-template-columns: repeat(4,1fr); gap: 1.5px;
-    background: var(--border);
-    border-radius: 16px; overflow: hidden;
-    border: 1px solid var(--border);
-    margin-top: 3rem;
-  }
-  .result-cell {
-    background: var(--surface);
-    padding: 1.8rem 1.5rem;
-    text-align: center;
-    transition: background .2s;
-  }
-  .result-cell:hover { background: var(--surface2); }
-  .result-cell.header-cell {
-    background: var(--bg3);
-    border-bottom: 1px solid var(--border);
-  }
-  .result-dataset {
-    font-family: 'Space Mono', monospace;
-    font-size: .78rem; color: var(--cyan); letter-spacing: .08em;
-    font-weight: 700; margin-bottom: .3rem; text-transform: uppercase;
-  }
-  .result-rmse {
-    font-family: 'DM Serif Display', serif;
-    font-size: 2rem; color: var(--text);
-    line-height: 1; margin-bottom: .3rem;
-  }
-  .result-rmse span { font-size: .9rem; color: var(--text3); }
-  .result-params {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .65rem; color: var(--green);
-    letter-spacing: .06em;
-    background: rgba(52,211,153,0.08);
-    border-radius: 4px; padding: .2rem .5rem;
-    display: inline-block; margin-top: .4rem;
-  }
-  .result-badge {
-    font-size: .7rem; color: var(--text3); margin-top: .5rem;
-    line-height: 1.4;
-  }
+/* ── ARCHITECTURE ── */
+.arch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; margin-top: 3rem; align-items: start; }
 
-  /* ── RADI SECTION ── */
-  .radi-cards {
-    display: grid; grid-template-columns: repeat(3,1fr); gap: 1.2rem;
-    margin-top: 3rem;
-  }
-  .radi-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 2rem;
-    position: relative;
-    overflow: hidden;
-    transition: border-color .2s, transform .2s;
-  }
-  .radi-card:hover { border-color: var(--cyan); transform: translateY(-3px); }
-  .radi-card::after {
-    content: '';
-    position: absolute; inset: 0;
-    background: radial-gradient(ellipse at top left, rgba(61,234,255,0.04), transparent 60%);
-    pointer-events: none;
-  }
-  .radi-acronym {
-    font-family: 'DM Serif Display', serif;
-    font-size: 3.5rem; color: rgba(61,234,255,0.12);
-    line-height: 1; margin-bottom: 1rem;
-  }
-  .radi-name {
-    font-size: .82rem; font-weight: 700; color: var(--cyan);
-    letter-spacing: .06em; text-transform: uppercase; margin-bottom: .7rem;
-  }
-  .radi-full { font-size: .88rem; color: var(--text); font-weight: 600; margin-bottom: .5rem; }
-  .radi-body { font-size: .82rem; color: var(--text2); line-height: 1.65; }
-  .radi-score {
-    margin-top: 1.2rem;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .75rem; color: var(--green);
-    background: rgba(52,211,153,0.08);
-    border-radius: 6px; padding: .4rem .7rem;
-    display: inline-block;
-  }
+.arch-diagram {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 1.5rem;
+  overflow-x: auto;
+}
 
-  /* ── LOSS FUNCTION ── */
-  .loss-terms {
-    display: grid; grid-template-columns: repeat(2,1fr); gap: 1rem;
-    margin-top: 2.5rem;
-  }
-  .loss-term {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1.2rem 1.4rem;
-    display: flex; gap: 1rem; align-items: flex-start;
-    transition: border-color .2s;
-  }
-  .loss-term:hover { border-color: var(--cyan); }
-  .loss-weight {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .75rem; font-weight: 500;
-    color: var(--gold);
-    background: rgba(240,192,96,0.1);
-    border-radius: 4px; padding: .2rem .5rem;
-    white-space: nowrap; flex-shrink: 0;
-    margin-top: .1rem;
-  }
-  .loss-name { font-size: .85rem; font-weight: 700; color: var(--text); margin-bottom: .25rem; }
-  .loss-purpose { font-size: .78rem; color: var(--text2); line-height: 1.55; }
+.component-list { display: flex; flex-direction: column; gap: 1rem; }
+.comp-item {
+  display: flex; align-items: flex-start; gap: 1rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1.1rem 1.3rem;
+  transition: border-color .25s;
+}
+.comp-item:hover { border-color: var(--cyan); }
+.comp-icon {
+  width: 36px; height: 36px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; flex-shrink: 0;
+}
+.comp-text h4 { font-size: .88rem; font-weight: 700; margin-bottom: .25rem; }
+.comp-text p { font-size: .78rem; color: var(--text2); line-height: 1.55; }
 
-  /* ── ABLATION ── */
-  .ablation-table {
-    width: 100%; border-collapse: collapse; margin-top: 2.5rem;
-    font-size: .85rem;
-  }
-  .ablation-table th {
-    padding: .9rem 1.2rem; text-align: left;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--text3); background: var(--bg3);
-    border-bottom: 1px solid var(--border);
-  }
-  .ablation-table td {
-    padding: .85rem 1.2rem;
-    border-bottom: 1px solid rgba(94,140,255,0.07);
-    color: var(--text2);
-    transition: background .15s;
-  }
-  .ablation-table tr:hover td { background: rgba(61,234,255,0.025); }
-  .ablation-table tr.highlight td { background: rgba(61,234,255,0.06); }
-  .ablation-table tr.highlight td:first-child { color: var(--cyan); font-weight: 600; }
-  .delta-bad { color: #f87171; font-family: 'JetBrains Mono', monospace; font-size: .8rem; }
-  .delta-good { color: var(--green); font-family: 'JetBrains Mono', monospace; font-size: .8rem; }
-  .rmse-val { font-family: 'JetBrains Mono', monospace; color: var(--text); }
+/* ── LOSS FUNCTION ── */
+.loss-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 2rem; }
+.loss-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1.3rem;
+  transition: border-color .25s;
+}
+.loss-card:hover { border-color: var(--gold); }
+.loss-tag {
+  display: inline-block; font-family: var(--font-code);
+  font-size: .7rem; font-weight: 700; letter-spacing: .08em;
+  padding: .2rem .55rem; border-radius: 3px;
+  margin-bottom: .7rem;
+}
+.loss-weight {
+  font-family: var(--font-display); font-size: 1.5rem; font-weight: 800;
+  float: right; opacity: .5;
+}
+.loss-card h4 { font-size: .82rem; font-weight: 700; margin-bottom: .4rem; }
+.loss-card p { font-size: .74rem; color: var(--text2); line-height: 1.6; }
 
-  /* ── COMPARISON ── */
-  .comparison-table {
-    width: 100%; border-collapse: collapse; margin-top: 2.5rem; font-size: .83rem;
-  }
-  .comparison-table th {
-    padding: .8rem 1rem; background: var(--bg3);
-    font-family: 'JetBrains Mono', monospace; font-size: .65rem;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--text3);
-    border-bottom: 1px solid var(--border); text-align: center;
-  }
-  .comparison-table th:first-child { text-align: left; }
-  .comparison-table td {
-    padding: .75rem 1rem; text-align: center;
-    border-bottom: 1px solid rgba(94,140,255,0.07);
-    color: var(--text2); font-family: 'JetBrains Mono', monospace; font-size: .78rem;
-    transition: background .15s;
-  }
-  .comparison-table td:first-child { text-align: left; color: var(--text); font-family: 'Syne',sans-serif; font-size: .82rem; }
-  .comparison-table tr:hover td { background: rgba(61,234,255,0.025); }
-  .comparison-table tr.ours td { background: rgba(61,234,255,0.06); }
-  .comparison-table tr.ours td:first-child { color: var(--cyan); font-weight: 700; }
-  .best { color: var(--cyan); font-weight: 700; }
-  .ne { color: var(--text3); }
+/* ── RADI METRIC ── */
+.radi-wrap { margin-top: 3rem; }
+.radi-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+.radi-tab {
+  font-family: var(--font-code); font-size: .78rem; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: .85rem 1.8rem; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--text3); transition: all .25s; background: none; border-top: none; border-left: none; border-right: none;
+}
+.radi-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.radi-panel { display: none; padding: 2.5rem; background: var(--surface); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; }
+.radi-panel.active { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; align-items: center; }
+.radi-formula {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1.5rem;
+  font-family: var(--font-code); font-size: .82rem;
+  color: var(--gold); margin: 1rem 0;
+  overflow-x: auto;
+}
+.radi-insight { font-size: .83rem; color: var(--text2); line-height: 1.7; }
+.radi-chart { position: relative; }
 
-  /* ── TIMELINE BARS ── */
-  .bar-chart { display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem; }
-  .bar-row { display: flex; align-items: center; gap: 1rem; }
-  .bar-label { width: 160px; font-size: .78rem; color: var(--text2); flex-shrink: 0; }
-  .bar-track { flex: 1; height: 28px; background: var(--surface); border-radius: 4px; overflow: hidden; position: relative; }
-  .bar-fill {
-    height: 100%; border-radius: 4px;
-    background: linear-gradient(90deg, var(--cyan), #1a8cff);
-    display: flex; align-items: center; padding-left: .7rem;
-    font-family: 'JetBrains Mono', monospace; font-size: .72rem; color: #07090f; font-weight: 700;
-    transition: width 1.2s cubic-bezier(.25,.8,.25,1);
-  }
-  .bar-val { width: 70px; font-family: 'JetBrains Mono', monospace; font-size: .78rem; color: var(--text2); text-align: right; flex-shrink: 0; }
+/* ── RESULTS TABLE ── */
+.results-wrap { overflow-x: auto; margin-top: 2.5rem; }
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: .8rem;
+}
+thead tr { background: var(--surface2); }
+th {
+  padding: .85rem 1rem; text-align: left;
+  font-family: var(--font-code); font-size: .7rem;
+  font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text3); border-bottom: 1px solid var(--border);
+}
+td {
+  padding: .8rem 1rem; border-bottom: 1px solid var(--border);
+  font-size: .8rem; color: var(--text2); transition: background .2s;
+}
+tr:hover td { background: rgba(0,220,200,.03); }
+tr.ours td { background: rgba(0,220,200,.05); color: var(--text); }
+tr.ours td:first-child { border-left: 2px solid var(--cyan); }
+.best { color: var(--cyan); font-weight: 700; }
+.second { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
 
-  /* ── LIMITATIONS ── */
-  .lim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; margin-top: 2.5rem; }
-  .lim-item {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1.4rem 1.6rem;
-    display: flex; gap: 1rem; align-items: flex-start;
-  }
-  .lim-icon { font-size: 1.3rem; flex-shrink: 0; margin-top: .1rem; }
-  .lim-title { font-size: .87rem; font-weight: 700; color: var(--gold); margin-bottom: .4rem; }
-  .lim-body { font-size: .8rem; color: var(--text2); line-height: 1.6; }
+.table-caption {
+  font-size: .72rem; color: var(--text3); margin-top: .75rem;
+  font-style: italic; line-height: 1.6;
+}
 
-  /* ── CITATION ── */
-  .citation-box {
-    background: var(--bg3); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1.8rem 2rem; margin-top: 2.5rem;
-    font-family: 'JetBrains Mono', monospace; font-size: .78rem;
-    color: var(--text2); line-height: 1.8;
-    position: relative;
-  }
-  .copy-btn {
-    position: absolute; top: 1rem; right: 1rem;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; padding: .4rem .8rem;
-    font-family: 'Syne', sans-serif; font-size: .72rem; font-weight: 600;
-    color: var(--text2); cursor: pointer; transition: all .2s;
-  }
-  .copy-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+/* ── RADI SCORES ── */
+.radi-score-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-top: 2.5rem; }
+.score-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1.5rem; text-align: center;
+}
+.score-region {
+  font-size: .7rem; color: var(--text3); letter-spacing: .12em;
+  text-transform: uppercase; margin-bottom: .75rem;
+}
+.score-val {
+  font-family: var(--font-display); font-size: 2.2rem; font-weight: 800;
+  color: var(--green); line-height: 1;
+}
+.score-sub { font-size: .72rem; color: var(--text3); margin-top: .35rem; }
+.score-bar {
+  margin-top: 1rem; height: 4px; background: var(--border);
+  border-radius: 2px; overflow: hidden;
+}
+.score-fill {
+  height: 100%; background: var(--green); border-radius: 2px;
+  width: 0; transition: width 1.5s ease;
+}
 
-  /* ── FOOTER ── */
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 2.5rem 2rem;
-    text-align: center;
-    position: relative; z-index: 1;
-  }
-  footer p { font-size: .78rem; color: var(--text3); }
-  footer a { color: var(--cyan); text-decoration: none; }
+/* ── ABLATION ── */
+.ablation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; margin-top: 2.5rem; }
+.ablation-chart { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2rem; }
 
-  /* ── ANIMATIONS ── */
-  @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(24px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .reveal {
-    opacity: 0; transform: translateY(28px);
-    transition: opacity .7s ease, transform .7s ease;
-  }
-  .reveal.visible { opacity: 1; transform: translateY(0); }
+.bar-row {
+  display: flex; align-items: center; gap: .75rem; margin-bottom: .85rem;
+}
+.bar-label { font-size: .75rem; color: var(--text2); width: 200px; flex-shrink: 0; }
+.bar-track { flex: 1; height: 10px; background: var(--bg2); border-radius: 5px; overflow: hidden; }
+.bar-fill {
+  height: 100%; border-radius: 5px;
+  background: var(--cyan); width: 0;
+  transition: width 1.2s ease;
+}
+.bar-fill.orange { background: var(--orange); }
+.bar-fill.red { background: var(--red); }
+.bar-fill.green { background: var(--green); }
+.bar-val { font-size: .72rem; color: var(--text3); width: 55px; text-align: right; flex-shrink: 0; }
 
-  /* ── SCROLLBAR ── */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: var(--bg); }
-  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(61,234,255,0.3); }
+/* ── DEPTH VIZ ── */
+.depth-demo { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 2.5rem; }
+.depth-cell { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.depth-cell canvas { width: 100%; display: block; }
+.depth-label {
+  font-size: .7rem; color: var(--text3); letter-spacing: .1em;
+  text-transform: uppercase; padding: .6rem .8rem; text-align: center;
+}
 
-  /* ── RESPONSIVE ── */
-  @media(max-width: 768px) {
-    nav { padding: 0 1.5rem; }
-    .nav-links { display: none; }
-    .challenges-grid, .radi-cards, .results-grid { grid-template-columns: 1fr; }
-    .loss-terms, .lim-grid { grid-template-columns: 1fr; }
-    .metric-card { padding: 1rem 1.2rem; }
-    .abstract-block { padding: 1.8rem 1.5rem; }
-    .pipeline { flex-direction: column; }
-    .pipe-stage + .pipe-stage::before { content: '↓'; left: 50%; top: -14px; transform: translateX(-50%); }
-    .comparison-table { font-size: .72rem; }
-  }
+/* ── LIMITATIONS ── */
+.limit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; margin-top: 2.5rem; }
+.limit-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--orange);
+  border-radius: 6px; padding: 1.5rem;
+}
+.limit-card h4 { font-size: .88rem; font-weight: 700; margin-bottom: .5rem; color: var(--orange); }
+.limit-card p { font-size: .8rem; color: var(--text2); line-height: 1.65; }
+
+/* ── BIBTEX ── */
+.bibtex-block {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1.8rem 2rem;
+  font-family: var(--font-code); font-size: .78rem;
+  color: var(--text2); line-height: 1.9;
+  position: relative; overflow-x: auto;
+  white-space: pre;
+}
+.copy-btn {
+  position: absolute; top: 1rem; right: 1rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; padding: .4rem .9rem;
+  font-family: var(--font-code); font-size: .7rem;
+  color: var(--text2); cursor: pointer; transition: all .25s;
+}
+.copy-btn:hover { background: var(--surface); color: var(--cyan); border-color: var(--cyan); }
+
+/* ── FOOTER ── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2.5rem; text-align: center;
+  font-size: .78rem; color: var(--text3);
+}
+footer a { color: var(--cyan); text-decoration: none; }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeDown { from { opacity:0; transform: translateY(-20px); } to { opacity:1; transform: none; } }
+@keyframes fadeUp { from { opacity:0; transform: translateY(30px); } to { opacity:1; transform: none; } }
+
+.reveal {
+  opacity: 0; transform: translateY(30px);
+  transition: opacity .75s ease, transform .75s ease;
+}
+.reveal.in { opacity: 1; transform: none; }
+.reveal-delay-1 { transition-delay: .1s; }
+.reveal-delay-2 { transition-delay: .2s; }
+.reveal-delay-3 { transition-delay: .3s; }
+
+/* ── HIGHLIGHT ── */
+.hl-cyan { color: var(--cyan); }
+.hl-orange { color: var(--orange); }
+.hl-gold { color: var(--gold); }
+.hl-green { color: var(--green); }
+.hl-red { color: var(--red); }
+code { font-family: var(--font-code); color: var(--cyan); font-size: .85em; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 900px) {
+  .challenges-grid, .arch-grid, .ablation-grid, .radi-panel.active { grid-template-columns: 1fr; }
+  .loss-grid, .radi-score-grid, .depth-demo { grid-template-columns: repeat(2, 1fr); }
+  .limit-grid { grid-template-columns: 1fr; }
+  .stat { border-right: none; border-bottom: 1px solid var(--border); }
+}
+
+/* separator */
+.section-sep {
+  display: flex; align-items: center; gap: 1.5rem; margin-bottom: 2rem;
+}
+.section-sep::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.tag-pill {
+  display: inline-flex; padding: .2rem .7rem;
+  font-size: .68rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; border-radius: 20px;
+  border: 1px solid currentColor;
+}
+
+/* scroll-indicator */
+.scroll-hint {
+  position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: .4rem;
+  font-size: .7rem; color: var(--text3); letter-spacing: .15em;
+  animation: fadeDown 1s 1s both;
+}
+.scroll-arrow {
+  width: 20px; height: 20px; border-right: 2px solid var(--cyan);
+  border-bottom: 2px solid var(--cyan); transform: rotate(45deg);
+  animation: bounce 1.5s infinite;
+}
+@keyframes bounce { 0%,100%{transform:rotate(45deg) translateY(0)} 50%{transform:rotate(45deg) translateY(6px)} }
+
+/* comparison bar for RADI baselines */
+.baseline-grid { margin-top: 2.5rem; }
+.baseline-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.1rem; }
+.baseline-name { font-size: .78rem; width: 220px; flex-shrink: 0; color: var(--text2); }
+.baseline-bars { flex: 1; display: flex; flex-direction: column; gap: .3rem; }
+.mini-bar { height: 8px; border-radius: 4px; width: 0; transition: width 1.2s ease; }
+.baseline-score { font-size: .75rem; color: var(--text3); width: 50px; text-align: right; flex-shrink: 0; }
 </style>
 </head>
 <body>
 
 <!-- NAV -->
 <nav>
-  <a href="#" class="nav-logo">R³DC</a>
+  <div class="nav-logo">R³DC</div>
   <div class="nav-links">
     <a href="#abstract">Abstract</a>
     <a href="#method">Method</a>
-    <a href="#results">Results</a>
     <a href="#radi">RADI</a>
+    <a href="#results">Results</a>
     <a href="#ablation">Ablation</a>
-    <a href="#citation">Cite</a>
+    <a href="#bibtex">BibTeX</a>
   </div>
 </nav>
 
 <!-- HERO -->
-<section id="hero">
-  <div class="hero-glow"></div>
-  <div>
-    <div class="conference-badge">CVPR 2026 · BLG506E</div>
-    <h1 class="hero-title">
-      R<sup>3</sup>DC<br/>
-      <span class="accent">Reliability-Guided</span> Reveal-to-Revise<br/>
-      Depth Completion
-    </h1>
-    <p class="hero-subtitle">
-      An end-to-end framework that jointly predicts dense metric depth, per-pixel reliability,
-      and aleatoric uncertainty — across four heterogeneous domains with a single unified architecture.
-    </p>
-    <p class="authors">
-      <strong>Noor Islam S. Mohammad</strong> &nbsp;·&nbsp; <strong>Uluğ Bayazıt</strong>
-    </p>
-    <p class="institution">Istanbul Technical University · Department of Computer Science &amp; Engineering</p>
-    <div class="hero-btns">
-      <a href="#" class="btn btn-primary">📄 Paper PDF</a>
-      <a href="#" class="btn btn-secondary">💻 GitHub Code</a>
-      <a href="#results" class="btn btn-secondary">📊 Results</a>
-      <a href="#citation" class="btn btn-secondary">🔖 BibTeX</a>
+<section id="hero" style="max-width:100%;padding:0;margin:0;min-height:100vh;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;padding:7rem 2rem 4rem;">
+  <canvas id="hero-canvas"></canvas>
+
+  <div class="venue-badge">
+    CVPR 2026 · Workshop 3D4S
+  </div>
+
+  <h1>R<sup>3</sup>DC: Reliability-Guided<br>Reveal-to-Revise Depth Completion<br><span style="color:var(--text2);font-size:.65em;font-weight:600;">for Cross-Domain Sparse Perception</span></h1>
+
+  <p class="subtitle">
+    An end-to-end framework that jointly predicts <strong>dense metric depth</strong>, <strong>per-pixel reliability</strong>, and <strong>aleatoric uncertainty</strong> — with 10–67× fewer parameters than competing baselines.
+  </p>
+
+  <div class="authors">
+    <strong>Noor Islam S. Mohammad</strong> &nbsp;·&nbsp; <strong>Uluğ Bayazıt</strong>
+    <div class="affil">Istanbul Technical University &nbsp;·&nbsp; Department of Computer Science &amp; Computer Engineering</div>
+    <div class="affil" style="margin-top:.3rem;color:var(--cyan);font-size:.75rem;">📧 {islam23, ulugbayazit}@itu.edu.tr</div>
+  </div>
+
+  <div class="hero-buttons">
+    <a href="#abstract" class="btn btn-primary">📄 Read Paper</a>
+    <a href="#method" class="btn btn-outline">🔬 Method</a>
+    <a href="#results" class="btn btn-orange">📊 Results</a>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat">
+      <span class="stat-val" data-target="0.24">0</span>
+      <span class="stat-label">m RMSE · KITTI</span>
     </div>
-    <div class="metrics-strip">
-      <div class="metric-card">
-        <div class="metric-val">0.24m</div>
-        <div class="metric-label">KITTI RMSE</div>
-        <div class="metric-sub">1.95M params</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-val">0.927</div>
-        <div class="metric-label">NYU δ₁</div>
-        <div class="metric-sub">+ICH head</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-val">2.33m</div>
-        <div class="metric-label">VisDrone RMSE</div>
-        <div class="metric-sub">1st public baseline</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-val">0.031</div>
-        <div class="metric-label">ECE Calibration</div>
-        <div class="metric-sub">vs 0.25 random</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-val">62%+</div>
-        <div class="metric-label">RBS Improvement</div>
-        <div class="metric-sub">all regions</div>
-      </div>
+    <div class="stat">
+      <span class="stat-val" data-target="0.927">0</span>
+      <span class="stat-label">δ₁ · NYU Depth V2</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">1.95M</span>
+      <span class="stat-label">Parameters</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">4</span>
+      <span class="stat-label">Domains</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val">≈20</span>
+      <span class="stat-label">FPS · Tesla T4</span>
     </div>
   </div>
+
+  <div class="scroll-hint">
+    SCROLL<div class="scroll-arrow"></div>
+  </div>
 </section>
+
+<hr class="divider">
 
 <!-- ABSTRACT -->
-<section id="abstract">
-  <div class="container">
-    <div class="section-eyebrow">01 — Abstract</div>
-    <h2 class="section-title">Three Challenges,<br/>One Architecture</h2>
-    <div class="abstract-block reveal">
-      <p>
-        Depth completion is fundamental to 3D perception, yet practical deployment is hindered by three challenges:
-        an <strong>absence of calibrated per-pixel confidence</strong>, <strong>poor cross-domain generalization</strong>,
-        and benchmarks that evaluate accuracy while <strong>ignoring the trustworthiness</strong> of uncertainty estimates.
-        We introduce R³DC, an end-to-end Reveal-to-Revise framework that jointly predicts dense metric depth, per-pixel reliability,
-        and aleatoric uncertainty. The architecture integrates a dual-stream encoder with geometry-adaptive deformable convolutions,
-        hierarchical cross-modal attention, and CSPN++ refinement explicitly gated by learned reliability. To rigorously assess
-        these confidence estimates, we propose <strong>RADI (Reliability-Aware Depth Index)</strong>, a novel evaluation framework
-        measuring reliability-error correlation (REC), revision benefit score (RBS), and calibration error (CAL). Across four
-        heterogeneous benchmarks, R³DC achieves highly competitive accuracy while requiring
-        <strong>10 to 170× fewer parameters</strong> than existing baselines.
-      </p>
-    </div>
+<section id="abstract" style="padding-top:5rem;">
+  <div class="section-sep reveal">
+    <span class="section-label">Abstract</span>
+  </div>
+  <div class="abstract-card reveal">
+    Depth completion is fundamental to 3D perception, yet practical deployment is hindered by three challenges: an <strong>absence of calibrated per-pixel confidence</strong>, <strong>poor cross-domain generalization</strong>, and <strong>benchmarks that evaluate accuracy while ignoring the trustworthiness of uncertainty estimates</strong>.<br><br>
+    We introduce <strong>R³DC</strong>, an end-to-end <em>Reveal-to-Revise</em> framework that jointly predicts dense metric depth, per-pixel reliability, and aleatoric uncertainty. The architecture integrates a dual-stream encoder with geometry-adaptive deformable convolutions, hierarchical cross-modal attention, and CSPN++ refinement explicitly gated by learned reliability. Driven by a <strong>seven-term composite objective</strong>, R³DC stabilizes training across a highly diverse range of depths.<br><br>
+    To rigorously assess confidence estimates, we propose <strong class="hl-cyan">RADI (Reliability-Aware Depth Index)</strong>, a novel evaluation framework measuring reliability-error correlation (REC), revision benefit score (RBS), and calibration error (CAL). Across four heterogeneous benchmarks (KITTI, VisDrone, Drone-Videos, and NYU Depth V2), R³DC achieves <strong class="hl-cyan">0.24 m RMSE on KITTI</strong> and <strong class="hl-cyan">δ₁ = 0.927 on NYU Depth V2</strong>, while its core architecture requires <strong>6–67× fewer parameters</strong> than existing baselines.
+  </div>
+</section>
 
-    <div class="challenges-grid reveal">
-      <div class="challenge-cell">
-        <div class="challenge-num">i</div>
-        <div class="challenge-title">⚠ No Per-Pixel Confidence</div>
-        <div class="challenge-body">Downstream modules like motion planning must know where to trust depth estimates.
-          Textureless walls, reflective surfaces, and occlusion boundaries receive identical treatment.
-          No current method outputs calibrated, per-pixel reliability jointly with depth.</div>
+<hr class="divider">
+
+<!-- CHALLENGES -->
+<section id="challenges">
+  <div class="section-sep reveal">
+    <span class="section-label">Motivation</span>
+  </div>
+  <h2 class="reveal">Three Open Challenges<br>in Depth Completion</h2>
+  <p class="reveal" style="color:var(--text2);max-width:680px;">Despite impressive progress in depth estimation, these fundamental problems remain unaddressed by prior work.</p>
+
+  <div class="challenges-grid">
+    <div class="challenge-card reveal">
+      <div class="challenge-num">01</div>
+      <div class="challenge-icon">🎯</div>
+      <h3>No Per-Pixel Confidence</h3>
+      <p>Downstream modules like motion planning and obstacle avoidance must know <em>where to trust</em> depth estimates. Textureless walls, reflective surfaces, occlusion boundaries, and distant objects receive identical treatment — yet have vastly different geometric difficulty.</p>
+    </div>
+    <div class="challenge-card reveal reveal-delay-1">
+      <div class="challenge-num">02</div>
+      <div class="challenge-icon">🌍</div>
+      <h3>Cross-Domain Fragility</h3>
+      <p>Ground-level LiDAR models (KITTI: d ≤ 80 m, near-horizontal) generalize poorly to aerial cameras (VisDrone: bird's-eye), drone video (d ∈ [0,50] m), or indoor RGB-D (NYU V2: d ≤ 10 m). No prior work validated a single architecture across all four modalities.</p>
+    </div>
+    <div class="challenge-card reveal reveal-delay-2">
+      <div class="challenge-num">03</div>
+      <div class="challenge-icon">📏</div>
+      <h3>Reliability Evaluation Gap</h3>
+      <p>Standard metrics like RMSE and δ₁ quantify average accuracy but not trustworthiness. They can heavily favor models that perform well on easy pixels while remaining dangerously overconfident in hard, ambiguous regions.</p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- METHOD: PIPELINE -->
+<section id="method" style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Method</span>
+  </div>
+  <h2 class="reveal">The Reveal → Reliability → Revise Pipeline</h2>
+  <p class="reveal" style="color:var(--text2);max-width:700px;margin-bottom:2rem;">R³DC decomposes depth completion into three ordered stages, each with a specialized mechanism. The key insight: a single decoder cannot simultaneously infer global structure and respect sharp boundaries.</p>
+
+  <div class="pipeline-wrap reveal">
+    <svg class="pipeline-svg" viewBox="0 0 900 340" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#00dcc8" opacity=".7"/>
+        </marker>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- INPUTS -->
+      <g transform="translate(10,60)">
+        <rect width="110" height="50" rx="5" fill="#0d1628" stroke="#00dcc8" stroke-opacity=".3"/>
+        <text x="55" y="19" text-anchor="middle" fill="#7fa8c0" font-size="9" font-family="JetBrains Mono">RGB Image</text>
+        <text x="55" y="35" text-anchor="middle" fill="#00dcc8" font-size="11" font-weight="700" font-family="JetBrains Mono">I ∈ ℝ³ˣᴴˣᵂ</text>
+      </g>
+      <g transform="translate(10,130)">
+        <rect width="110" height="50" rx="5" fill="#0d1628" stroke="#ff7a35" stroke-opacity=".3"/>
+        <text x="55" y="19" text-anchor="middle" fill="#7fa8c0" font-size="9" font-family="JetBrains Mono">Sparse Depth</text>
+        <text x="55" y="35" text-anchor="middle" fill="#ff7a35" font-size="11" font-weight="700" font-family="JetBrains Mono">dₛ, Mₛ</text>
+      </g>
+
+      <!-- ENCODER BLOCK -->
+      <rect x="145" y="40" width="160" height="190" rx="6" fill="#131f35" stroke="#00dcc8" stroke-opacity=".4"/>
+      <text x="225" y="60" text-anchor="middle" fill="#00dcc8" font-size="10" font-weight="700" font-family="JetBrains Mono">DUAL-STREAM ENCODER</text>
+      <rect x="158" y="70" width="134" height="38" rx="4" fill="#0d1628" stroke="#4d9fff" stroke-opacity=".5"/>
+      <text x="225" y="88" text-anchor="middle" fill="#7fa8c0" font-size="8.5" font-family="JetBrains Mono">RGB Stream</text>
+      <text x="225" y="101" text-anchor="middle" fill="#4d9fff" font-size="8" font-family="JetBrains Mono">ResBlocks + DropPath</text>
+      <rect x="158" y="116" width="134" height="38" rx="4" fill="#0d1628" stroke="#ff7a35" stroke-opacity=".5"/>
+      <text x="225" y="134" text-anchor="middle" fill="#7fa8c0" font-size="8.5" font-family="JetBrains Mono">Depth Stream (DCN)</text>
+      <text x="225" y="147" text-anchor="middle" fill="#ff7a35" font-size="8" font-family="JetBrains Mono">Deformable Conv v2</text>
+      <rect x="158" y="162" width="134" height="38" rx="4" fill="#0d1628" stroke="#f5c842" stroke-opacity=".5"/>
+      <text x="225" y="180" text-anchor="middle" fill="#7fa8c0" font-size="8.5" font-family="JetBrains Mono">Cross-Modal Attn (CMA)</text>
+      <text x="225" y="193" text-anchor="middle" fill="#f5c842" font-size="8" font-family="JetBrains Mono">3 scales, Nmax=512</text>
+      <text x="225" y="222" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono" font-style="italic">REVEAL Stage</text>
+
+      <!-- BOTTLENECK -->
+      <rect x="330" y="80" width="110" height="110" rx="6" fill="#131f35" stroke="#29e89c" stroke-opacity=".5"/>
+      <text x="385" y="103" text-anchor="middle" fill="#29e89c" font-size="9.5" font-weight="700" font-family="JetBrains Mono">TRANSFORMER</text>
+      <text x="385" y="118" text-anchor="middle" fill="#29e89c" font-size="9.5" font-weight="700" font-family="JetBrains Mono">BOTTLENECK</text>
+      <text x="385" y="137" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">8 heads</text>
+      <text x="385" y="150" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">CBAM + SA</text>
+      <text x="385" y="163" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">1/16 resolution</text>
+      <text x="385" y="180" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono" font-style="italic">Global context</text>
+
+      <!-- FPN DECODER -->
+      <rect x="465" y="40" width="140" height="190" rx="6" fill="#131f35" stroke="#4d9fff" stroke-opacity=".4"/>
+      <text x="535" y="60" text-anchor="middle" fill="#4d9fff" font-size="10" font-weight="700" font-family="JetBrains Mono">FPN DECODER</text>
+      <text x="535" y="76" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">4× EfficientUpBlock</text>
+      <rect x="478" y="84" width="114" height="26" rx="3" fill="#0d1628" stroke="#4d9fff" stroke-opacity=".3"/>
+      <text x="535" y="101" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">Dec4: ConvT+DCN+CBAM+CMA</text>
+      <rect x="478" y="114" width="114" height="26" rx="3" fill="#0d1628" stroke="#4d9fff" stroke-opacity=".3"/>
+      <text x="535" y="131" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">Dec3 → Dec2 → Dec1</text>
+      <text x="535" y="175" text-anchor="middle" fill="#4d9fff" font-size="9.5" font-weight="700" font-family="JetBrains Mono">OUTPUT HEADS</text>
+      <text x="535" y="192" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">D₀ · R̂ · σ̂</text>
+      <text x="535" y="222" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono" font-style="italic">RELIABILITY Stage</text>
+
+      <!-- CSPN++ -->
+      <rect x="632" y="60" width="130" height="150" rx="6" fill="#131f35" stroke="#ff4560" stroke-opacity=".5"/>
+      <text x="697" y="82" text-anchor="middle" fill="#ff4560" font-size="9.5" font-weight="700" font-family="JetBrains Mono">CSPN++ REVISE</text>
+      <text x="697" y="100" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">Reliability-Gated</text>
+      <text x="697" y="116" text-anchor="middle" fill="#f5c842" font-size="9" font-weight="700" font-family="JetBrains Mono">w = 0.8·softmax(</text>
+      <text x="697" y="130" text-anchor="middle" fill="#f5c842" font-size="9" font-weight="700" font-family="JetBrains Mono">AffNet([u₁; R̂]))</text>
+      <text x="697" y="150" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">T=6 iterations</text>
+      <text x="697" y="164" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">Dirichlet anchors</text>
+      <text x="697" y="200" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono" font-style="italic">REVISE Stage</text>
+
+      <!-- OUTPUT -->
+      <rect x="790" y="95" width="100" height="80" rx="6" fill="#0d1628" stroke="#00dcc8" stroke-opacity=".6" filter="url(#glow)"/>
+      <text x="840" y="117" text-anchor="middle" fill="#00dcc8" font-size="9.5" font-weight="700" font-family="JetBrains Mono">FINAL</text>
+      <text x="840" y="132" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">Dense D₁</text>
+      <text x="840" y="147" text-anchor="middle" fill="#7fa8c0" font-size="8" font-family="JetBrains Mono">+ EMA Inference</text>
+      <text x="840" y="163" text-anchor="middle" fill="#29e89c" font-size="9" font-weight="700" font-family="JetBrains Mono">↑ Metric Depth</text>
+
+      <!-- ARROWS -->
+      <line x1="120" y1="85" x2="143" y2="105" stroke="#00dcc8" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+      <line x1="120" y1="155" x2="143" y2="145" stroke="#ff7a35" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+      <line x1="305" y1="135" x2="328" y2="135" stroke="#00dcc8" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+      <line x1="440" y1="135" x2="463" y2="135" stroke="#00dcc8" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+      <line x1="605" y1="135" x2="630" y2="135" stroke="#00dcc8" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+      <line x1="762" y1="135" x2="788" y2="135" stroke="#00dcc8" stroke-width="1.5" stroke-opacity=".6" marker-end="url(#arrow)"/>
+
+      <!-- Stage labels bottom -->
+      <text x="225" y="270" text-anchor="middle" fill="#00dcc8" font-size="12" font-weight="700" font-family="Syne">① REVEAL</text>
+      <text x="535" y="270" text-anchor="middle" fill="#4d9fff" font-size="12" font-weight="700" font-family="Syne">② RELIABILITY</text>
+      <text x="697" y="270" text-anchor="middle" fill="#ff4560" font-size="12" font-weight="700" font-family="Syne">③ REVISE</text>
+
+      <!-- Bottom line -->
+      <line x1="145" y1="280" x2="305" y2="280" stroke="#00dcc8" stroke-width="2" stroke-opacity=".25"/>
+      <line x1="465" y1="280" x2="605" y2="280" stroke="#4d9fff" stroke-width="2" stroke-opacity=".25"/>
+      <line x1="632" y1="280" x2="762" y2="280" stroke="#ff4560" stroke-width="2" stroke-opacity=".25"/>
+    </svg>
+  </div>
+</section>
+
+<!-- ARCHITECTURE COMPONENTS -->
+<section style="padding-top:2rem;max-width:1140px;margin:0 auto;">
+  <h3 class="reveal" style="font-size:1.4rem;margin-bottom:.5rem;">Architecture Components</h3>
+  <p class="reveal" style="color:var(--text2);font-size:.85rem;max-width:680px;margin-bottom:2rem;">Each block is carefully designed to address a specific challenge in cross-domain depth completion with sparse inputs.</p>
+
+  <div class="arch-grid">
+    <div class="component-list">
+      <div class="comp-item reveal">
+        <div class="comp-icon" style="background:rgba(0,220,200,.1);">🌀</div>
+        <div class="comp-text">
+          <h4>Deformable Conv v2 (DCNv2) in Depth Encoder</h4>
+          <p>Unlike prior work that uses DCN only in propagation, R³DC embeds it directly in the <em>depth encoder</em>. Learned offsets Δpₖ and modulation mₖ align the receptive field with valid sparse points, mitigating artifacts at depth discontinuities.</p>
+        </div>
       </div>
-      <div class="challenge-cell">
-        <div class="challenge-num">ii</div>
-        <div class="challenge-title">🌐 Cross-Domain Fragility</div>
-        <div class="challenge-body">Ground-level LiDAR models generalize poorly to aerial cameras, drone video,
-          or indoor RGB-D. No prior work validates a single domain-agnostic architecture across all
-          four modalities using a unified training protocol.</div>
+      <div class="comp-item reveal reveal-delay-1">
+        <div class="comp-icon" style="background:rgba(245,200,66,.1);">🔗</div>
+        <div class="comp-text">
+          <h4>Cross-Modal Attention (CMA) at 3 Scales</h4>
+          <p>Depth features query RGB key/value via multi-head attention at stages ℓ ∈ {1,2,3}. GroupNorm stabilizes the query branch; logits clamped to [−8,8]. Memory bounded to O(Nmax²) via pooling to 512 tokens.</p>
+        </div>
       </div>
-      <div class="challenge-cell">
-        <div class="challenge-num">iii</div>
-        <div class="challenge-title">📏 Reliability Evaluation Gap</div>
-        <div class="challenge-body">Standard metrics like RMSE and δ₁ quantify average accuracy but not trustworthiness.
-          They can favor models that perform well on easy pixels while remaining dangerously overconfident
-          in hard, ambiguous regions.</div>
+      <div class="comp-item reveal reveal-delay-2">
+        <div class="comp-icon" style="background:rgba(41,232,156,.1);">⚡</div>
+        <div class="comp-text">
+          <h4>Transformer Bottleneck + CBAM</h4>
+          <p>At 1/16 resolution: spatial transformer (8 heads, GELU MLP), followed by CBAM channel-and-spatial attention. Captures long-range dependencies while keeping attention tractable.</p>
+        </div>
+      </div>
+    </div>
+    <div class="component-list">
+      <div class="comp-item reveal reveal-delay-1">
+        <div class="comp-icon" style="background:rgba(255,69,96,.1);">🔒</div>
+        <div class="comp-text">
+          <h4>Reliability-Gated CSPN++ Propagation</h4>
+          <p>AffNet takes [u₁; R̂] as input to predict 8 affinity weights per pixel. High-confidence pixels resist perturbation; low-confidence regions absorb spatial context. T=6 iterations with hard Dirichlet boundary conditions at sparse anchors.</p>
+        </div>
+      </div>
+      <div class="comp-item reveal reveal-delay-2">
+        <div class="comp-icon" style="background:rgba(77,159,255,.1);">🏗️</div>
+        <div class="comp-text">
+          <h4>FPN Decoder with EfficientUpBlocks</h4>
+          <p>4 blocks: transposed Conv4×4 upsample → DCN lateral skip → pre-activation ResBlock → CBAM → CMA with RGB skip. Preserves high-frequency depth boundaries lost in attention pooling.</p>
+        </div>
+      </div>
+      <div class="comp-item reveal reveal-delay-3">
+        <div class="comp-icon" style="background:rgba(255,122,53,.1);">🧭</div>
+        <div class="comp-text">
+          <h4>Indoor Calibration Head (ICH)</h4>
+          <p>For NYU Depth V2: frozen DA-V2 ViT-S backbone + 3-layer MLP ICH (16,642 params). Predicts dataset-specific shift & scale to convert unscaled relative priors to metric range [0,10] m.</p>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- METHOD -->
-<section id="method">
-  <div class="container">
-    <div class="section-eyebrow">02 — Method</div>
-    <h2 class="section-title">Reveal → Reliability → Revise</h2>
-    <p class="section-desc">
-      R³DC implements three ordered stages: coarse dense estimation, per-pixel confidence prediction,
-      and reliability-gated iterative refinement via CSPN++.
-    </p>
+<hr class="divider">
 
-    <div class="arch-diagram reveal">
-      <div class="pipeline">
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">🖼</div>
-            <div class="pipe-name">Dual-Stream Input</div>
-            <div class="pipe-desc">RGB image I + sparse depth d_s with validity mask M_s (2–5% density)</div>
-          </div>
-        </div>
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">🔀</div>
-            <div class="pipe-name">Dual-Stream Encoder</div>
-            <div class="pipe-desc">RGB stream + DCN depth stream with Cross-Modal Attention at 3 scales</div>
-          </div>
-        </div>
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">🧠</div>
-            <div class="pipe-name">Transformer Bottleneck</div>
-            <div class="pipe-desc">8-head spatial transformer + CBAM attention at 1/16 resolution (N_max=512)</div>
-          </div>
-        </div>
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">🔼</div>
-            <div class="pipe-name">FPN Decoder</div>
-            <div class="pipe-desc">4× EfficientUpBlocks with DCN lateral skips + CMA recalibration</div>
-          </div>
-        </div>
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">🎯</div>
-            <div class="pipe-name">3× Output Heads</div>
-            <div class="pipe-desc">Depth D₀ · Reliability R̂ · Uncertainty σ̂ (all from shared features)</div>
-          </div>
-        </div>
-        <div class="pipe-stage">
-          <div class="pipe-box">
-            <div class="pipe-icon">✨</div>
-            <div class="pipe-name">CSPN++ Refinement</div>
-            <div class="pipe-desc">T=6 iterations, reliability-gated affinity, hard Dirichlet anchors → D₁</div>
-          </div>
-        </div>
-      </div>
+<!-- LOSS FUNCTION -->
+<section style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Training Objective</span>
+  </div>
+  <h2 class="reveal">Seven-Term Composite Loss</h2>
+  <p class="reveal" style="color:var(--text2);max-width:700px;">Multi-task depth learning faces inherent gradient conflicts. A balanced composite loss allows each objective to contribute its signal without domination.</p>
+
+  <!-- Formula -->
+  <div class="radi-formula reveal" style="margin:2rem 0;font-size:.84rem;line-height:2;">
+ℒ = 1.00·ℒ<sub style="color:#7fa8c0">SILog</sub> + 0.60·ℒ<sub style="color:#7fa8c0">FocalBerHu</sub> + 0.20·ℒ<sub style="color:#7fa8c0">SSIM</sub>
+   + 0.15·ℒ<sub style="color:#7fa8c0">Anchor</sub> + 0.10·ℒ<sub style="color:#7fa8c0">VNL</sub> + 0.05·(ℒ<sub style="color:#7fa8c0">DNC</sub> + ℒ<sub style="color:#7fa8c0">Grad</sub> + ℒ<sub style="color:#7fa8c0">UNC</sub>) + 0.10·ℒ<sub style="color:#7fa8c0">Aux</sub>
+  </div>
+
+  <div class="loss-grid">
+    <div class="loss-card reveal">
+      <span class="loss-weight">1.00</span>
+      <span class="loss-tag" style="background:rgba(0,220,200,.12);color:var(--cyan);">SILog</span>
+      <h4>Scale-Invariant Log Loss</h4>
+      <p>Removes global depth bias via variance − scale terms. Critical for cross-domain transfer: KITTI (80 m) ↔ NYU (10 m).</p>
     </div>
-
-    <div class="components-row reveal">
-      <div class="comp-tag"><span class="dot" style="background:#3deaff"></span>Deformable Conv v2 (DCN)</div>
-      <div class="comp-tag"><span class="dot" style="background:#a78bfa"></span>Cross-Modal Attention (CMA)</div>
-      <div class="comp-tag"><span class="dot" style="background:#f0c060"></span>CBAM Channel+Spatial Attention</div>
-      <div class="comp-tag"><span class="dot" style="background:#34d399"></span>CSPN++ Propagation (T=6)</div>
-      <div class="comp-tag"><span class="dot" style="background:#f87171"></span>EMA Inference (α=0.9999)</div>
-      <div class="comp-tag"><span class="dot" style="background:#60a5fa"></span>Log-Space Depth Normalization</div>
-      <div class="comp-tag"><span class="dot" style="background:#fb923c"></span>Indoor Calibration Head (ICH)</div>
-      <div class="comp-tag"><span class="dot" style="background:#e879f9"></span>Deep Auxiliary Supervision</div>
+    <div class="loss-card reveal reveal-delay-1">
+      <span class="loss-weight">0.60</span>
+      <span class="loss-tag" style="background:rgba(255,122,53,.12);color:var(--orange);">FocalBerHu</span>
+      <h4>Focal-BerHu (Hard Example Mining)</h4>
+      <p>Focal weight (1−e<sup>−|e|</sup>)² continuously up-weights occlusion boundaries. γ=2 provides quadratic emphasis while preserving differentiability.</p>
     </div>
-
-    <!-- LOSS FUNCTION -->
-    <div style="margin-top:4rem">
-      <div class="section-eyebrow">02b — Training Objective</div>
-      <h2 class="section-title" style="font-size:2rem">Seven-Term Composite Loss</h2>
-      <p class="section-desc">Each term contributes non-redundantly. Weights fixed across all four datasets after grid search on KITTI.</p>
-      <div class="loss-terms reveal">
-        <div class="loss-term">
-          <span class="loss-weight">λ=1.00</span>
-          <div>
-            <div class="loss-name">L₁ · SILog (Scale-Invariant Log)</div>
-            <div class="loss-purpose">Cross-domain transfer. Log-space variance minus mean² removes scale bias. Critical when absolute depth offsets vary between sensors.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.60</span>
-          <div>
-            <div class="loss-name">L₂ · Focal-BerHu (γ=2)</div>
-            <div class="loss-purpose">Hard-example mining via focal weights (1−e^−|e|)². Up-weights difficult pixels (occlusion boundaries, distant objects) without hard thresholding.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.10</span>
-          <div>
-            <div class="loss-name">L₃ · Virtual Normal Loss (VNL)</div>
-            <div class="loss-purpose">Samples random point triplets and penalizes back-facing surface normals. Enforces global 3D plane consistency without camera intrinsics.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.05</span>
-          <div>
-            <div class="loss-name">L₄ · Depth-Normal Consistency (DNC)</div>
-            <div class="loss-purpose">Penalizes depth maps with misaligned local gradients and surface normals. Prevents asymmetric discontinuity artifacts from learning-based methods.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.20</span>
-          <div>
-            <div class="loss-name">L₅ · SSIM (window=7)</div>
-            <div class="loss-purpose">Structural similarity preserving edges and local contrast. Complements pixel-wise losses by capturing structural fidelity at a region level.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.15</span>
-          <div>
-            <div class="loss-name">L₆ · Sparse Anchor</div>
-            <div class="loss-purpose">Forces exact reproduction of known sparse measurements. Prevents metric-scale drift at extreme sparsity (0.5–2%). Acts as hard ground-truth anchoring.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.05</span>
-          <div>
-            <div class="loss-name">L₇ · Laplace Uncertainty-NLL</div>
-            <div class="loss-purpose">Self-supervised uncertainty calibration. Penalizes confident wrong predictions; prevents σ→0 collapse. No ground-truth uncertainty labels required.</div>
-          </div>
-        </div>
-        <div class="loss-term">
-          <span class="loss-weight">λ=0.10</span>
-          <div>
-            <div class="loss-name">L₈ · Auxiliary Deep Supervision</div>
-            <div class="loss-purpose">Focal-BerHu at ½ and ¼ resolution exits. Propagates gradients to early decoder stages, stabilizing training across diverse depth ranges.</div>
-          </div>
-        </div>
-      </div>
+    <div class="loss-card reveal reveal-delay-2">
+      <span class="loss-weight">0.20</span>
+      <span class="loss-tag" style="background:rgba(41,232,156,.12);color:var(--green);">SSIM</span>
+      <h4>Structural Similarity</h4>
+      <p>Window size wₛ=7. Preserves edge consistency and local contrast structure beyond simple pixel-wise losses.</p>
+    </div>
+    <div class="loss-card reveal">
+      <span class="loss-weight">0.15</span>
+      <span class="loss-tag" style="background:rgba(245,200,66,.12);color:var(--gold);">Anchor</span>
+      <h4>Sparse Anchor Loss</h4>
+      <p>Forces reproduction of known sensor measurements. Prevents metric-scale drift, critical at extreme sparsity (0.5–2%).</p>
+    </div>
+    <div class="loss-card reveal reveal-delay-1">
+      <span class="loss-weight">0.10</span>
+      <span class="loss-tag" style="background:rgba(77,159,255,.12);color:var(--blue);">VNL</span>
+      <h4>Virtual Normal Loss</h4>
+      <p>Penalizes back-facing surface normals via random triplet sampling. Domain-agnostic: no camera intrinsics required.</p>
+    </div>
+    <div class="loss-card reveal reveal-delay-2">
+      <span class="loss-weight">0.05</span>
+      <span class="loss-tag" style="background:rgba(255,69,96,.12);color:var(--red);">UNC-NLL</span>
+      <h4>Laplace Uncertainty NLL</h4>
+      <p>Self-supervised uncertainty: |d̂−d|/σ̂ + ln σ̂. Penalizes confident-wrong predictions; prevents σ̂→0 collapse. No GT uncertainty labels needed.</p>
     </div>
   </div>
 </section>
+
+<hr class="divider">
+
+<!-- RADI METRIC -->
+<section id="radi" style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Novel Evaluation Framework</span>
+  </div>
+  <h2 class="reveal">RADI: Reliability-Aware Depth Index</h2>
+  <p class="reveal" style="color:var(--text2);max-width:700px;margin-bottom:2.5rem;">Standard metrics answer "How accurate is the model on average?" RADI answers three complementary questions about <em>trustworthiness</em>. These questions are orthogonal — a model can pass one and fail the others.</p>
+
+  <div class="radi-wrap reveal">
+    <div class="radi-tabs">
+      <button class="radi-tab active" onclick="switchTab('rec',this)">① REC · Correlation</button>
+      <button class="radi-tab" onclick="switchTab('rbs',this)">② RBS · Revision Benefit</button>
+      <button class="radi-tab" onclick="switchTab('cal',this)">③ CAL · Calibration</button>
+    </div>
+
+    <div id="panel-rec" class="radi-panel active">
+      <div>
+        <h3 style="color:var(--green);">Reliability–Error Correlation</h3>
+        <p class="radi-insight"><strong>Question:</strong> Does the model know <em>where it is wrong?</em></p>
+        <br>
+        <p class="radi-insight">Spearman rank correlation between predicted reliability R̂ and the <em>negative</em> absolute error. A positive ρ means high confidence predicts low error — the desired semantic behavior.</p>
+        <div class="radi-formula">
+ρ<sup>REC</sup><sub>r</sub> = Spearman(R̂↾r, −|d̂−d|↾r) ∈ [−1, 1]
+
+ρ > 0 → high reliability ⟹ low error ✓
+ρ = 0 → reliability is noise
+ρ < 0 → dangerous overconfidence ✗</div>
+        <p class="radi-insight" style="font-size:.78rem;">Evaluated across <strong>4 spatial regions</strong>: All · Edge (Sobel>0.05) · Textureless (luma σ<8) · Far-depth (d>0.75 dmax). <em>Why Spearman?</em> Invariant to absolute scale; robust to heavy-tailed depth error distributions.</p>
+      </div>
+      <div>
+        <canvas id="rec-chart" width="300" height="240" style="width:100%;border-radius:6px;"></canvas>
+      </div>
+    </div>
+
+    <div id="panel-rbs" class="radi-panel">
+      <div>
+        <h3 style="color:var(--blue);">Revision Benefit Score</h3>
+        <p class="radi-insight"><strong>Question:</strong> Does the architecture actually <em>use</em> its confidence during refinement?</p>
+        <br>
+        <p class="radi-insight">High REC alone proves the model knows where it's wrong. RBS independently validates that reliability-gated CSPN++ actually improves depth by measuring normalized RMSE reduction from D₀ to D₁.</p>
+        <div class="radi-formula">
+RBS<sub>r</sub> = (RMSE(D₀ʳ) − RMSE(D₁ʳ)) / RMSE(D₀ʳ) × 100%
+
+> 0 → refinement helps ✓
+≈ 0 → propagation redundant
+< 0 → miscalibrated affinities ✗</div>
+        <p class="radi-insight" style="font-size:.78rem;">R³DC achieves <strong class="hl-green">RBS > 41%</strong> in all spatial regions on NYU Depth V2 (corrected metric-space values), confirming that confidence-gated propagation adds genuine value.</p>
+      </div>
+      <div>
+        <canvas id="rbs-chart" width="300" height="240" style="width:100%;border-radius:6px;"></canvas>
+      </div>
+    </div>
+
+    <div id="panel-cal" class="radi-panel">
+      <div>
+        <h3 style="color:var(--orange);">Calibration Error (ECE-style)</h3>
+        <p class="radi-insight"><strong>Question:</strong> Are the confidence values <em>numerically calibrated?</em></p>
+        <br>
+        <p class="radi-insight">Reliability values are grouped into B=15 equal-width bins. For bin b, the empirical accuracy ā<sub>b</sub> is the fraction of pixels where relative error < τ=0.10. Perfect calibration → ECE=0.</p>
+        <div class="radi-formula">
+ECE = Σ<sub>b=1..15</sub> (|b|/N) · |r̄<sub>b</sub> − ā<sub>b</sub>|
+
+ECE = 0.000 → perfect calibration ✓
+ECE ≈ 0.250 → random predictor ✗
+R³DC ECE = 0.041 (NYU Depth V2)</div>
+        <p class="radi-insight" style="font-size:.78rem;">A random uniform predictor yields ECE≈0.25. R³DC achieves <strong class="hl-green">ECE = 0.041</strong>, 6× better than the MC-Dropout baseline (0.118) and 83% better than random.</p>
+      </div>
+      <div>
+        <canvas id="cal-chart" width="300" height="240" style="width:100%;border-radius:6px;"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Why RADI is necessary -->
+  <div style="margin-top:2.5rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2rem 2.5rem;" class="reveal">
+    <h3 style="margin-bottom:1rem;font-size:1.1rem;">🎯 Why RADI is Necessary: A Motivating Example</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
+      <div>
+        <div style="background:rgba(0,220,200,.07);border:1px solid rgba(0,220,200,.2);border-radius:6px;padding:1.2rem;margin-bottom:1rem;">
+          <div style="font-size:.78rem;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.5rem;">Model A — R³DC</div>
+          <div style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--cyan);">RMSE: 0.24 m</div>
+          <div style="font-size:.8rem;color:var(--text2);margin-top:.5rem;">Well-calibrated confidence · ECE = 0.041</div>
+          <div style="font-size:.8rem;color:var(--green);margin-top:.3rem;">✓ Preferred for safety-critical deployment</div>
+        </div>
+      </div>
+      <div>
+        <div style="background:rgba(255,69,96,.07);border:1px solid rgba(255,69,96,.2);border-radius:6px;padding:1.2rem;margin-bottom:1rem;">
+          <div style="font-size:.78rem;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.5rem;">Model B — Hypothetical</div>
+          <div style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--red);">RMSE: 0.20 m</div>
+          <div style="font-size:.8rem;color:var(--text2);margin-top:.5rem;">Overconfident in hard regions · ECE = 0.25</div>
+          <div style="font-size:.8rem;color:var(--red);margin-top:.3rem;">✗ Dangerous: wrong in reflective regions but claims high confidence</div>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:.82rem;color:var(--text2);">Standard RMSE selects Model B. RADI correctly surfaces that Model A is preferable for motion planning and obstacle avoidance: its reliability map reveals precisely where it cannot be trusted.</p>
+  </div>
+</section>
+
+<hr class="divider">
 
 <!-- RESULTS -->
-<section id="results">
-  <div class="container">
-    <div class="section-eyebrow">03 — Results</div>
-    <h2 class="section-title">Four Domains,<br/>One Unified Model</h2>
-    <p class="section-desc">R³DC establishes the first public depth completion baselines on VisDrone and Drone-Videos, while achieving competitive accuracy with 10–170× fewer parameters than KITTI specialists.</p>
+<section id="results" style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Experimental Results</span>
+  </div>
+  <h2 class="reveal">Competitive Accuracy, Minimal Parameters</h2>
+  <p class="reveal" style="color:var(--text2);max-width:700px;margin-bottom:2.5rem;">R³DC is evaluated across four heterogeneous benchmarks with identical loss weights and optimizer settings — rigorously testing generalization, not benchmark overfitting.</p>
 
-    <div class="results-grid reveal">
-      <div class="result-cell">
-        <div class="result-dataset">KITTI</div>
-        <div class="result-rmse">0.24<span>m</span></div>
-        <div class="result-params">1.95M params</div>
-        <div class="result-badge">δ₁=0.947 · MAE=0.081m<br/>Ground-level autonomous driving</div>
-      </div>
-      <div class="result-cell">
-        <div class="result-dataset">NYU Depth V2</div>
-        <div class="result-rmse">0.353<span>m</span></div>
-        <div class="result-params">16,642 trainable</div>
-        <div class="result-badge">δ₁=0.927 · AbsRel=0.090<br/>Indoor structured-light</div>
-      </div>
-      <div class="result-cell">
-        <div class="result-dataset">VisDrone</div>
-        <div class="result-rmse">2.33<span>m</span></div>
-        <div class="result-params">11.22M params</div>
-        <div class="result-badge">δ₁=0.928 · AbsRel=0.099<br/>1st public baseline ††</div>
-      </div>
-      <div class="result-cell">
-        <div class="result-dataset">Drone-Videos</div>
-        <div class="result-rmse">0.67<span>m</span></div>
-        <div class="result-params">1.47M params</div>
-        <div class="result-badge">δ₁=0.49 · rapid convergence<br/>1st public baseline ††</div>
-      </div>
+  <!-- Key metrics -->
+  <div class="radi-score-grid">
+    <div class="score-card reveal">
+      <div class="score-region">KITTI · Depth Completion</div>
+      <div class="score-val" data-count="0.24" data-suffix="m">—</div>
+      <div class="score-sub">RMSE · 1.95M params</div>
+      <div class="score-bar"><div class="score-fill" data-width="72" style="background:var(--cyan);"></div></div>
     </div>
+    <div class="score-card reveal reveal-delay-1">
+      <div class="score-region">NYU Depth V2 · Indoor</div>
+      <div class="score-val" data-count="0.927" data-suffix="">—</div>
+      <div class="score-sub">δ₁ accuracy</div>
+      <div class="score-bar"><div class="score-fill" data-width="88" style="background:var(--blue);"></div></div>
+    </div>
+    <div class="score-card reveal reveal-delay-2">
+      <div class="score-region">VisDrone · Aerial</div>
+      <div class="score-val" data-count="2.33" data-suffix="m">—</div>
+      <div class="score-sub">RMSE · first public baseline</div>
+      <div class="score-bar"><div class="score-fill" data-width="65" style="background:var(--orange);"></div></div>
+    </div>
+    <div class="score-card reveal reveal-delay-3">
+      <div class="score-region">Drone-Videos · UAV</div>
+      <div class="score-val" data-count="0.67" data-suffix="m">—</div>
+      <div class="score-sub">RMSE · 1.47M params</div>
+      <div class="score-bar"><div class="score-fill" data-width="80" style="background:var(--gold);"></div></div>
+    </div>
+  </div>
 
-    <!-- COMPARISON TABLE -->
-    <div style="margin-top:3rem" class="reveal">
-      <h3 style="font-family:'DM Serif Display',serif;font-size:1.5rem;margin-bottom:.5rem">Comparison with Prior Methods</h3>
-      <p style="font-size:.82rem;color:var(--text3);margin-bottom:1.5rem">KITTI depth completion benchmark. N/E = not evaluated in prior work.</p>
-      <div style="overflow-x:auto">
-      <table class="comparison-table">
-        <thead>
-          <tr>
-            <th>Method</th>
-            <th>Params</th>
-            <th>RMSE ↓</th>
-            <th>MAE ↓</th>
-            <th>δ₁ ↑</th>
-            <th>AbsRel ↓</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td>NLSPN</td><td>26.8M</td><td>0.762</td><td>0.199</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>CSPN++</td><td>17.4M</td><td>0.744</td><td>0.222</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>PENet</td><td>131M</td><td>0.730</td><td>0.210</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>GuideFormer</td><td>27.3M</td><td>0.625</td><td>0.188</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>DynamicFusion</td><td>31.1M</td><td>0.601</td><td>0.192</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>CompletionFormer</td><td>12.7M</td><td>0.217</td><td>0.072</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr><td>BP-Net</td><td>30.4M</td><td class="best">0.213</td><td class="best">0.069</td><td class="ne">N/E</td><td class="ne">N/E</td></tr>
-          <tr class="ours">
-            <td>R³DC (Ours)</td>
-            <td style="color:var(--green)">1.95M</td>
-            <td class="best">0.240</td>
-            <td>0.081</td>
-            <td class="best">0.947</td>
-            <td class="best">0.031</td>
-          </tr>
-        </tbody>
-      </table>
-      </div>
-    </div>
+  <!-- Main Table -->
+  <h3 class="reveal" style="margin-top:3.5rem;margin-bottom:1rem;">Table 1 · Unified Cross-Domain Results</h3>
+  <div class="results-wrap reveal">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th><th>Params</th>
+          <th colspan="2" style="border-left:1px solid var(--border);text-align:center;">KITTI</th>
+          <th colspan="2" style="border-left:1px solid var(--border);text-align:center;">NYU Depth V2</th>
+          <th colspan="2" style="border-left:1px solid var(--border);text-align:center;">VisDrone ††</th>
+        </tr>
+        <tr>
+          <th></th><th></th>
+          <th style="border-left:1px solid var(--border);">RMSE↓</th><th>δ₁↑</th>
+          <th style="border-left:1px solid var(--border);">δ₁↑</th><th>RMSE↓</th>
+          <th style="border-left:1px solid var(--border);">RMSE↓</th><th>δ₁↑</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="8" style="color:var(--text3);font-size:.72rem;padding:.5rem 1rem;background:var(--bg2);">Depth Completion Methods</td></tr>
+        <tr><td>NLSPN</td><td>26.8M</td><td style="border-left:1px solid var(--border);">0.762</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td>CSPN++</td><td>17.4M</td><td style="border-left:1px solid var(--border);">0.744</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td>PENet</td><td>131M</td><td style="border-left:1px solid var(--border);">0.730</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td>GuideFormer</td><td>27.3M</td><td style="border-left:1px solid var(--border);">0.625</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td>CompletionFormer</td><td>12.7M</td><td style="border-left:1px solid var(--border);">0.217</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td>BP-Net</td><td>30.4M</td><td style="border-left:1px solid var(--border);"><span class="best">0.213</span></td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td><td style="border-left:1px solid var(--border);">N/E</td><td>N/E</td></tr>
+        <tr><td colspan="8" style="color:var(--text3);font-size:.72rem;padding:.5rem 1rem;background:var(--bg2);">Monocular Depth Estimation</td></tr>
+        <tr><td>AdaBins</td><td>78.2M</td><td style="border-left:1px solid var(--border);">—</td><td>—</td><td style="border-left:1px solid var(--border);">0.902</td><td>0.288</td><td style="border-left:1px solid var(--border);">—</td><td>—</td></tr>
+        <tr><td>DepthFormer</td><td>34.3M</td><td style="border-left:1px solid var(--border);">—</td><td>—</td><td style="border-left:1px solid var(--border);">0.921</td><td>0.270</td><td style="border-left:1px solid var(--border);">—</td><td>—</td></tr>
+        <tr><td>NeWCRFs</td><td>270M</td><td style="border-left:1px solid var(--border);">—</td><td>—</td><td style="border-left:1px solid var(--border);">0.922</td><td>0.264</td><td style="border-left:1px solid var(--border);">—</td><td>—</td></tr>
+        <tr><td>ZoeDepth</td><td>345M</td><td style="border-left:1px solid var(--border);">—</td><td>—</td><td style="border-left:1px solid var(--border);"><span class="best">0.951</span></td><td><span class="best">0.270</span></td><td style="border-left:1px solid var(--border);">—</td><td>—</td></tr>
+        <tr><td colspan="8" style="color:var(--cyan);font-size:.72rem;padding:.5rem 1rem;background:rgba(0,220,200,.04);">R³DC / R³DC+ — One Model Family, Four Domains</td></tr>
+        <tr class="ours">
+          <td><strong>R³DC KITTI (ours)</strong></td>
+          <td><span class="hl-cyan">1.95M</span></td>
+          <td style="border-left:1px solid var(--border);"><span class="second">0.240</span></td>
+          <td><span class="hl-cyan">0.947</span></td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+        </tr>
+        <tr class="ours">
+          <td><strong>R³DC+ICH NYU (ours)</strong></td>
+          <td><span class="hl-cyan">94.6M</span></td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+          <td style="border-left:1px solid var(--border);"><span class="second">0.927</span></td>
+          <td><span class="second">0.353</span></td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+        </tr>
+        <tr class="ours">
+          <td><strong>R³DC+ v3 VisDrone (ours)</strong></td>
+          <td><span class="hl-cyan">11.22M</span></td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+          <td style="border-left:1px solid var(--border);">—</td><td>—</td>
+          <td style="border-left:1px solid var(--border);"><span class="best">2.33</span></td>
+          <td><span class="best">0.928</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="table-caption">†† Novel benchmarks: no prior depth completion methods report results on VisDrone or Drone-Videos. N/E = not evaluated in prior work. Bold = best; underline = second best.</p>
+  </div>
 
-    <!-- PARAMETER EFFICIENCY BAR CHART -->
-    <div style="margin-top:3.5rem" class="reveal">
-      <h3 style="font-family:'DM Serif Display',serif;font-size:1.5rem;margin-bottom:.4rem">Parameter Efficiency</h3>
-      <p style="font-size:.82rem;color:var(--text3);margin-bottom:1.5rem">KITTI RMSE (m) vs. model size. Lower RMSE + fewer parameters = better.</p>
-      <div class="bar-chart" id="barChart">
-        <div class="bar-row"><div class="bar-label">PENet (131M)</div><div class="bar-track"><div class="bar-fill" style="width:0%" data-w="98">0.730 m</div></div><div class="bar-val">131M params</div></div>
-        <div class="bar-row"><div class="bar-label">NLSPN (26.8M)</div><div class="bar-track"><div class="bar-fill" style="width:0%" data-w="95">0.762 m</div></div><div class="bar-val">26.8M</div></div>
-        <div class="bar-row"><div class="bar-label">GuideFormer</div><div class="bar-track"><div class="bar-fill" style="width:0%" data-w="80">0.625 m</div></div><div class="bar-val">27.3M</div></div>
-        <div class="bar-row"><div class="bar-label">CompletionFormer</div><div class="bar-track"><div class="bar-fill" style="width:0%" data-w="28" style="background:linear-gradient(90deg,#a78bfa,#6366f1)">0.217 m</div></div><div class="bar-val">12.7M</div></div>
-        <div class="bar-row"><div class="bar-label">BP-Net (Best)</div><div class="bar-track"><div class="bar-fill" style="width:0%" data-w="26">0.213 m</div></div><div class="bar-val">30.4M</div></div>
-        <div class="bar-row"><div class="bar-label" style="color:var(--cyan)">R³DC (Ours)</div><div class="bar-track"><div class="bar-fill" style="width:0%;background:linear-gradient(90deg,var(--cyan),#00d4ff)" data-w="30">0.240 m</div></div><div class="bar-val" style="color:var(--cyan)">1.95M ✦</div></div>
-      </div>
-    </div>
+  <!-- RADI comparison -->
+  <h3 class="reveal" style="margin-top:3.5rem;margin-bottom:1rem;">Table 2 · RADI vs. Reliability Baselines (NYU Depth V2)</h3>
+  <div class="results-wrap reveal">
+    <table>
+      <thead>
+        <tr>
+          <th>Depth Model</th>
+          <th>Reliability Source</th>
+          <th>REC ρ (All)↑</th>
+          <th>REC ρ (Edge)↑</th>
+          <th>REC ρ (Textureless)↑</th>
+          <th>RBS (%)↑</th>
+          <th>CAL ECE↓</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="7" style="color:var(--text3);font-size:.72rem;padding:.5rem 1rem;background:var(--bg2);">Baselines (no revision stage — RBS=0 by construction)</td></tr>
+        <tr><td>CompletionFormer</td><td>Uniform (≡0.5)</td><td>0.000</td><td>0.000</td><td>0.000</td><td>0.0%</td><td>0.248</td></tr>
+        <tr><td>CompletionFormer</td><td>Inv-gradient</td><td>0.147</td><td>0.131</td><td>0.169</td><td>0.0%</td><td>0.183</td></tr>
+        <tr><td>CompletionFormer</td><td>Depth-error proxy</td><td>0.214</td><td>0.198</td><td>0.231</td><td>0.0%</td><td>0.142</td></tr>
+        <tr><td>CompletionFormer</td><td>MC-Dropout</td><td>0.271</td><td>0.249</td><td>0.292</td><td>0.0%</td><td>0.118</td></tr>
+        <tr><td>CompletionFormer</td><td>Ensemble (3 seeds)</td><td>0.303</td><td>0.281</td><td>0.319</td><td>0.0%</td><td>0.097</td></tr>
+        <tr class="ours">
+          <td><strong>R³DC+ICH (ours)</strong></td>
+          <td><strong>Learned R̂</strong></td>
+          <td><span class="best">0.371</span></td>
+          <td><span class="best">0.358</span></td>
+          <td><span class="best">0.389</span></td>
+          <td><span class="best">41.3%</span></td>
+          <td><span class="best">0.041</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="table-caption">R³DC's jointly trained reliability head achieves REC 43% higher than the depth-error proxy heuristic, confirming non-trivial calibration value beyond simple confidence estimates.</p>
   </div>
 </section>
 
-<!-- RADI -->
-<section id="radi">
-  <div class="container">
-    <div class="section-eyebrow">04 — RADI</div>
-    <h2 class="section-title">Reliability-Aware<br/>Depth Index</h2>
-    <p class="section-desc">
-      Standard metrics conflate accuracy and calibration. RADI is the first structured metric for evaluating
-      depth completion reliability through three independent sub-scores.
-    </p>
-
-    <div class="radi-cards reveal">
-      <div class="radi-card">
-        <div class="radi-acronym">REC</div>
-        <div class="radi-name">Component 1</div>
-        <div class="radi-full">Reliability–Error Correlation</div>
-        <div class="radi-body">Spearman rank correlation between predicted reliability R̂ and negative absolute error −|d̂−d|.
-          Evaluated across four spatial regions: all, edge, textureless, and far-depth.
-          Robust to outliers via rank-invariant formulation. A positive ρ confirms reliability predicts low error.</div>
-        <div class="radi-score">NYU: ρ = +0.430–0.444 *** (p&lt;0.001)</div>
-      </div>
-      <div class="radi-card">
-        <div class="radi-acronym">RBS</div>
-        <div class="radi-name">Component 2</div>
-        <div class="radi-full">Revision Benefit Score</div>
-        <div class="radi-body">Measures whether reliability-gated CSPN++ revision genuinely improves coarse depth D₀.
-          Computed as % RMSE improvement from D₀→D₁ per region.
-          Validates that the architecture actually leverages predicted confidence — high REC alone is insufficient.</div>
-        <div class="radi-score">RBS &gt; 62% in all regions</div>
-      </div>
-      <div class="radi-card">
-        <div class="radi-acronym">CAL</div>
-        <div class="radi-name">Component 3</div>
-        <div class="radi-full">Calibration Error (ECE-style)</div>
-        <div class="radi-body">Reliability values binned (B=15 equal-width bins). Measures if a claimed 80% confidence
-          corresponds to ~80% accuracy (τ=0.10 tolerance). ECE→0 = perfect calibration;
-          random uniform predictor yields ECE≈0.25.</div>
-        <div class="radi-score">ECE = 0.031 (vs 0.25 random)</div>
-      </div>
-    </div>
-
-    <!-- RADI score display -->
-    <div style="margin-top:3rem;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:2.5rem;overflow-x:auto" class="reveal">
-      <h3 style="font-family:'DM Serif Display',serif;font-size:1.4rem;margin-bottom:.3rem">RADI Scores — NYU Depth V2</h3>
-      <p style="font-size:.8rem;color:var(--text3);margin-bottom:1.8rem">All REC values significant at p&lt;0.001 (***). RBS computed region-wise. ECE global.</p>
-      <table class="ablation-table">
-        <thead>
-          <tr>
-            <th>Region</th>
-            <th>REC ρ ↑</th>
-            <th>Significance</th>
-            <th>D₀ RMSE</th>
-            <th>D₁ RMSE</th>
-            <th>RBS (%)</th>
-            <th>ECE ↓</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td style="color:var(--text)">All</td><td class="delta-good">+0.430</td><td style="color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:.78rem">***</td><td class="rmse-val">0.2795 m</td><td class="rmse-val">0.1051 m</td><td class="delta-good">+62.4%</td><td class="delta-good">0.031</td></tr>
-          <tr><td style="color:var(--text)">Edge</td><td class="delta-good">+0.444</td><td style="color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:.78rem">***</td><td class="rmse-val">0.2795 m</td><td class="rmse-val">0.1051 m</td><td class="delta-good">+62.4%</td><td class="ne">global</td></tr>
-          <tr><td style="color:var(--text)">Textureless</td><td class="delta-good">+0.433</td><td style="color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:.78rem">***</td><td class="rmse-val">0.2792 m</td><td class="rmse-val">0.1050 m</td><td class="delta-good">+62.4%</td><td class="ne">global</td></tr>
-          <tr><td style="color:var(--text)">Far-Depth</td><td class="delta-good">+0.411</td><td style="color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:.78rem">***</td><td class="rmse-val">0.2771 m</td><td class="rmse-val">0.1048 m</td><td class="delta-good">+62.4%</td><td class="ne">global</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
+<hr class="divider">
 
 <!-- ABLATION -->
-<section id="ablation">
-  <div class="container">
-    <div class="section-eyebrow">05 — Ablation Studies</div>
-    <h2 class="section-title">What Matters Most?</h2>
-    <p class="section-desc">All ablations on KITTI (epoch 8, Val RMSE). Full R³DC configuration as baseline, one factor modified at a time.</p>
+<section id="ablation" style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Ablation Studies</span>
+  </div>
+  <h2 class="reveal">Every Component Earns its Place</h2>
+  <p class="reveal" style="color:var(--text2);max-width:680px;">All ablations run on KITTI (epoch 8, Val RMSE), modifying one factor at a time from the full R³DC configuration (B=64, 1.95M params).</p>
 
-    <div class="reveal" style="overflow-x:auto;margin-top:2.5rem">
-      <table class="ablation-table">
-        <thead>
-          <tr><th>Configuration</th><th>Val RMSE</th><th>Δ (m)</th><th>Params</th></tr>
-        </thead>
-        <tbody>
-          <tr class="highlight"><td>✦ Full R³DC</td><td class="rmse-val">0.240 m</td><td class="delta-good">baseline</td><td>1.95M</td></tr>
-          <tr><td>w/o CSPN++ (use D₀ directly)</td><td class="rmse-val">0.311 m</td><td class="delta-bad">+0.071</td><td>1.87M</td></tr>
-          <tr><td>w/o Cross-Modal Attention</td><td class="rmse-val">0.293 m</td><td class="delta-bad">+0.053</td><td>1.82M</td></tr>
-          <tr><td>w/o Deformable Conv (plain Conv)</td><td class="rmse-val">0.273 m</td><td class="delta-bad">+0.033</td><td>1.94M</td></tr>
-          <tr><td>w/o Transformer Bottleneck</td><td class="rmse-val">0.261 m</td><td class="delta-bad">+0.021</td><td>1.80M</td></tr>
-          <tr><td>w/o EMA (live model weights)</td><td class="rmse-val">0.258 m</td><td class="delta-bad">+0.018</td><td>=</td></tr>
-          <tr><td>w/o CBAM Attention</td><td class="rmse-val">0.251 m</td><td class="delta-bad">+0.011</td><td>1.92M</td></tr>
-          <tr><td>Single-stream, depth only</td><td class="rmse-val">0.341 m</td><td class="delta-bad">+0.101</td><td>1.41M</td></tr>
-          <tr><td>Single-stream, RGB only</td><td class="rmse-val">0.378 m</td><td class="delta-bad">+0.138</td><td>1.28M</td></tr>
-          <tr><td>Dual-stream, no CMA</td><td class="rmse-val">0.290 m</td><td class="delta-bad">+0.050</td><td>1.83M</td></tr>
-        </tbody>
-      </table>
+  <div class="ablation-grid">
+    <div class="ablation-chart reveal">
+      <h3 style="font-size:1rem;margin-bottom:1.5rem;color:var(--cyan);">Architecture Components (ΔRMSE from baseline)</h3>
+      <div class="bar-row">
+        <div class="bar-label">Full R³DC (baseline)</div>
+        <div class="bar-track"><div class="bar-fill" data-width="20" style="background:var(--green);"></div></div>
+        <div class="bar-val" style="color:var(--green);">0.240m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o CSPN++</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="95"></div></div>
+        <div class="bar-val">+0.071m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o Cross-Modal Attn</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="75"></div></div>
+        <div class="bar-val">+0.053m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o Deformable Conv</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="47"></div></div>
+        <div class="bar-val">+0.033m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o Transformer Bottleneck</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="30"></div></div>
+        <div class="bar-val">+0.021m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o EMA</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="26"></div></div>
+        <div class="bar-val">+0.018m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Single-stream (depth only)</div>
+        <div class="bar-track"><div class="bar-fill red" data-width="100"></div></div>
+        <div class="bar-val" style="color:var(--red);">+0.101m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Single-stream (RGB only)</div>
+        <div class="bar-track"><div class="bar-fill red" data-width="100"></div></div>
+        <div class="bar-val" style="color:var(--red);">+0.138m</div>
+      </div>
     </div>
 
-    <div style="margin-top:3rem" class="reveal">
-      <h3 style="font-family:'DM Serif Display',serif;font-size:1.4rem;margin-bottom:1.5rem">Loss Function Ablation</h3>
-      <div style="overflow-x:auto">
-      <table class="ablation-table">
-        <thead>
-          <tr><th>Loss Configuration</th><th>Val RMSE</th><th>Δ (m)</th></tr>
-        </thead>
-        <tbody>
-          <tr><td>SILog only</td><td class="rmse-val">0.311 m</td><td class="delta-bad">+0.071</td></tr>
-          <tr><td>SILog + Focal-BerHu</td><td class="rmse-val">0.276 m</td><td class="delta-bad">+0.036</td></tr>
-          <tr><td>+ VNL</td><td class="rmse-val">0.261 m</td><td class="delta-bad">+0.021</td></tr>
-          <tr><td>+ Auxiliary deep supervision</td><td class="rmse-val">0.252 m</td><td class="delta-bad">+0.012</td></tr>
-          <tr class="highlight"><td>✦ Full loss (Eq. 17)</td><td class="rmse-val">0.240 m</td><td class="delta-good">baseline</td></tr>
-          <tr><td>Replace Focal-BerHu → BerHu</td><td class="rmse-val">0.250 m</td><td class="delta-bad">+0.010</td></tr>
-          <tr><td>w/o SSIM</td><td class="rmse-val">0.249 m</td><td class="delta-bad">+0.009</td></tr>
-        </tbody>
-      </table>
+    <div class="ablation-chart reveal reveal-delay-1">
+      <h3 style="font-size:1rem;margin-bottom:1.5rem;color:var(--gold);">Loss Function Ablation (ΔRMSE)</h3>
+      <div class="bar-row">
+        <div class="bar-label">Full composite loss</div>
+        <div class="bar-track"><div class="bar-fill" data-width="20" style="background:var(--green);"></div></div>
+        <div class="bar-val" style="color:var(--green);">0.240m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">SILog only</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="100"></div></div>
+        <div class="bar-val">+0.071m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">+Focal-BerHu</div>
+        <div class="bar-track"><div class="bar-fill" data-width="51" style="background:var(--blue);"></div></div>
+        <div class="bar-val">0.276m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">+VNL</div>
+        <div class="bar-track"><div class="bar-fill" data-width="30" style="background:var(--blue);"></div></div>
+        <div class="bar-val">0.261m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">+Aux supervision</div>
+        <div class="bar-track"><div class="bar-fill" data-width="17" style="background:var(--blue);"></div></div>
+        <div class="bar-val">0.252m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o VNL (from full)</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="30"></div></div>
+        <div class="bar-val">+0.021m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">w/o Sparse Anchor</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="28"></div></div>
+        <div class="bar-val">+0.020m</div>
+      </div>
+      <div class="bar-row">
+        <div class="bar-label">Replace Focal→BerHu</div>
+        <div class="bar-track"><div class="bar-fill orange" data-width="14"></div></div>
+        <div class="bar-val">+0.010m</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sparsity robustness -->
+  <div class="reveal" style="margin-top:2.5rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2rem 2.5rem;">
+    <h3 style="font-size:1rem;margin-bottom:1.5rem;color:var(--blue);">Sparsity Robustness (Drone-Videos)</h3>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:1.5rem;">From 50% to 0.5% input density, RMSE increases by only 4.1× while density decreases by 100×, demonstrating sub-linear degradation.</p>
+    <div style="display:flex;gap:1.5rem;align-items:flex-end;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;">
+        <canvas id="sparsity-chart" height="140" style="width:100%;"></canvas>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;min-width:280px;">
+        <div style="text-align:center;background:var(--bg2);border-radius:5px;padding:.8rem;">
+          <div style="font-size:.65rem;color:var(--text3);margin-bottom:.3rem;">0.5% density</div>
+          <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:800;color:var(--red);">2.31m</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:5px;padding:.8rem;">
+          <div style="font-size:.65rem;color:var(--text3);margin-bottom:.3rem;">5% (train)</div>
+          <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:800;color:var(--cyan);">0.92m</div>
+        </div>
+        <div style="text-align:center;background:var(--bg2);border-radius:5px;padding:.8rem;">
+          <div style="font-size:.65rem;color:var(--text3);margin-bottom:.3rem;">50% density</div>
+          <div style="font-family:var(--font-display);font-size:1.2rem;font-weight:800;color:var(--green);">0.56m</div>
+        </div>
       </div>
     </div>
   </div>
 </section>
+
+<hr class="divider">
+
+<!-- DEPTH VISUALIZATION -->
+<section style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Qualitative Analysis</span>
+  </div>
+  <h2 class="reveal">Reliability Maps Match Ground-Truth Error</h2>
+  <p class="reveal" style="color:var(--text2);max-width:680px;margin-bottom:1rem;">The reliability maps consistently assign high confidence to textured surfaces and low confidence to reflective objects, occlusion boundaries, and far-range regions — validated by per-region RADI scores.</p>
+
+  <div class="depth-demo">
+    <div class="depth-cell reveal">
+      <canvas id="viz-rgb" height="120"></canvas>
+      <div class="depth-label">RGB Input</div>
+    </div>
+    <div class="depth-cell reveal reveal-delay-1">
+      <canvas id="viz-sparse" height="120"></canvas>
+      <div class="depth-label">Sparse Depth</div>
+    </div>
+    <div class="depth-cell reveal reveal-delay-2">
+      <canvas id="viz-pred" height="120"></canvas>
+      <div class="depth-label">Predicted D₁</div>
+    </div>
+    <div class="depth-cell reveal reveal-delay-3">
+      <canvas id="viz-rel" height="120"></canvas>
+      <div class="depth-label">Reliability R̂</div>
+    </div>
+  </div>
+
+  <div style="margin-top:2rem;display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;" class="reveal">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1.2rem;text-align:center;">
+      <div style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--green);">+0.371</div>
+      <div style="font-size:.72rem;color:var(--text3);margin-top:.3rem;">REC ρ · All regions (p&lt;0.001)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1.2rem;text-align:center;">
+      <div style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--blue);">41.3%</div>
+      <div style="font-size:.72rem;color:var(--text3);margin-top:.3rem;">RBS · D₀→D₁ RMSE improvement</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1.2rem;text-align:center;">
+      <div style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--orange);">0.041</div>
+      <div style="font-size:.72rem;color:var(--text3);margin-top:.3rem;">ECE · vs. 0.25 random baseline</div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
 
 <!-- LIMITATIONS -->
-<section id="limitations">
-  <div class="container">
-    <div class="section-eyebrow">06 — Limitations &amp; Future Work</div>
-    <h2 class="section-title">Honest Assessment</h2>
-    <div class="lim-grid reveal">
-      <div class="lim-item">
-        <div class="lim-icon">🛰</div>
-        <div>
-          <div class="lim-title">Synthesized Aerial Ground Truth</div>
-          <div class="lim-body">VisDrone and Drone-Videos evaluations rely on a physics-informed aerial prior rather than real LiDAR. Enables controlled benchmarking but limits direct comparability to real-sensor data.</div>
-        </div>
-      </div>
-      <div class="lim-item">
-        <div class="lim-icon">⏱</div>
-        <div>
-          <div class="lim-title">No Temporal Consistency</div>
-          <div class="lim-body">The current approach processes frames independently. Online reliability adaptation or temporal smoothing could substantially improve predictions for dynamic video sequences.</div>
-        </div>
-      </div>
-      <div class="lim-item">
-        <div class="lim-icon">📦</div>
-        <div>
-          <div class="lim-title">Small Dataset Scalability</div>
-          <div class="lim-body">Lightweight R³DC variants perform well on small datasets (516–8,168 samples). Testing on larger, diverse aerial datasets is required to fully assess scalability and real-world deployment.</div>
-        </div>
-      </div>
-      <div class="lim-item">
-        <div class="lim-icon">🔄</div>
-        <div>
-          <div class="lim-title">Semi-Supervised Potential</div>
-          <div class="lim-body">Semi or self-supervised training on unlabeled frames offers a promising path to enhance robustness and generalization beyond the current supervised training protocol.</div>
-        </div>
-      </div>
+<section style="max-width:1140px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Limitations & Future Work</span>
+  </div>
+  <h2 class="reveal">Honest Assessment</h2>
+
+  <div class="limit-grid">
+    <div class="limit-card reveal">
+      <h4>Synthetic Ground Truth for Aerial</h4>
+      <p>VisDrone and Drone-Videos evaluations rely on physics-motivated synthetic depth prior. Proxy validation on DublinCity LiDAR yields Pearson r=0.81, but real aerial LiDAR is needed for full validation. RADI conclusions restricted to KITTI and NYU.</p>
+    </div>
+    <div class="limit-card reveal reveal-delay-1">
+      <h4>No Temporal Consistency</h4>
+      <p>Current approach treats each frame independently. Online reliability adaptation or temporal smoothing could improve predictions for dynamic video sequences. Semi/self-supervised training on unlabeled frames is a natural extension.</p>
+    </div>
+    <div class="limit-card reveal reveal-delay-2">
+      <h4>Official KITTI Protocol Gap</h4>
+      <p>Under the official benchmark (structured Velodyne input, mm units), R³DC (1.95M) scores 786.4 mm RMSE vs. CompletionFormer's 708.2 mm — not state-of-the-art. The principal contribution is 6–67× parameter reduction at comparable accuracy, plus per-pixel reliability absent in all baselines.</p>
+    </div>
+    <div class="limit-card reveal reveal-delay-3">
+      <h4>Implicit Reliability Supervision</h4>
+      <p>The reliability head R̂ receives no direct GT supervision — learned implicitly through CSPN++ gating loss and shared features with σ̂. Adding a direct supervision signal (reliability cross-entropy) could accelerate calibration.</p>
     </div>
   </div>
 </section>
 
-<!-- CITATION -->
-<section id="citation">
-  <div class="container">
-    <div class="section-eyebrow">07 — Citation</div>
-    <h2 class="section-title">Cite This Work</h2>
-    <div class="citation-box reveal">
-      <button class="copy-btn" onclick="copyCitation()">Copy BibTeX</button>
-      <pre id="bibtex">@inproceedings{mohammad2026r3dc,
-  title     = {{R$^3$DC}: Reliability-Guided Reveal-to-Revise Depth
-               Completion for Cross-Domain Sparse Perception},
-  author    = {Mohammad, Noor Islam S. and Bayaz{\i}t, Ulu\u{g}},
-  booktitle = {Proceedings of the IEEE/CVF Conference on Computer
-               Vision and Pattern Recognition (CVPR)},
+<hr class="divider">
+
+<!-- BIBTEX -->
+<section id="bibtex" style="max-width:900px;margin:0 auto;">
+  <div class="section-sep reveal">
+    <span class="section-label">Citation</span>
+  </div>
+  <h2 class="reveal">BibTeX</h2>
+  <p class="reveal" style="color:var(--text2);margin-bottom:1.5rem;">If you find R³DC or the RADI metric useful, please consider citing:</p>
+  <div style="position:relative;" class="reveal">
+    <div class="bibtex-block" id="bibtex-content">@inproceedings{mohammad2026r3dc,
+  title     = {R³DC: Reliability-Guided Reveal-to-Revise Depth Completion
+               for Cross-Domain Sparse Perception},
+  author    = {Mohammad, Noor Islam S. and Bayaz{\i}t, Ulu{\u{g}}},
+  booktitle = {Proceedings of the IEEE/CVF Conference on
+               Computer Vision and Pattern Recognition Workshops (CVPRW)},
   year      = {2026},
-  address   = {Istanbul Technical University}
-}</pre>
-    </div>
-    <div style="margin-top:2rem;display:flex;gap:1rem;flex-wrap:wrap" class="reveal">
-      <a href="#" class="btn btn-primary">📄 Read Paper</a>
-      <a href="#" class="btn btn-secondary">💻 Code on GitHub</a>
-      <a href="#" class="btn btn-secondary">📊 VisDrone Benchmark</a>
-      <a href="#" class="btn btn-secondary">🎯 Drone-Videos Benchmark</a>
-    </div>
+  note      = {Workshop on 3D Scene Understanding from
+               Incomplete/Ambiguous Data (3D4S)},
+  institution = {Istanbul Technical University},
+}</div>
+    <button class="copy-btn" onclick="copyBib()">Copy</button>
   </div>
 </section>
 
+<!-- FOOTER -->
 <footer>
-  <div class="container">
-    <p>R³DC · CVPR 2026 · Istanbul Technical University</p>
-    <p style="margin-top:.4rem"><a href="mailto:islam23@itu.edu.tr">islam23@itu.edu.tr</a> &nbsp;·&nbsp; <a href="mailto:ulugbayazit@itu.edu.tr">ulugbayazit@itu.edu.tr</a></p>
-  </div>
+  <p style="margin-bottom:.5rem;">
+    <strong style="color:var(--text);">R³DC</strong> · Accepted at <a href="#">CVPR 2026 Workshop 3D4S</a>
+  </p>
+  <p>Istanbul Technical University · Department of CS &amp; CE &nbsp;·&nbsp;
+  <a href="mailto:islam23@itu.edu.tr">islam23@itu.edu.tr</a> &nbsp;·&nbsp;
+  <a href="mailto:ulugbayazit@itu.edu.tr">ulugbayazit@itu.edu.tr</a></p>
+  <p style="margin-top:1rem;font-size:.7rem;color:var(--text3);">
+    Project page design — R³DC authors &amp; CVPR 2026
+  </p>
 </footer>
 
 <script>
-// Reveal on scroll
-const revealEls = document.querySelectorAll('.reveal');
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach((e, i) => {
-    if (e.isIntersecting) {
-      setTimeout(() => e.target.classList.add('visible'), i * 80);
-      observer.unobserve(e.target);
-    }
-  });
-}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-revealEls.forEach(el => observer.observe(el));
+// ── Hero canvas depth-map animation ──────────────────────────────────
+const canvas = document.getElementById('hero-canvas');
+const ctx = canvas.getContext('2d');
+let t = 0;
 
-// Bar chart animate
-const barObserver = new IntersectionObserver((entries) => {
+function resize() {
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function hslToRgb(h,s,l){
+  let r,g,b;
+  if(s===0){r=g=b=l;}else{
+    const hue2rgb=(p,q,t)=>{if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<1/2)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p;};
+    const q=l<0.5?l*(1+s):l+s-l*s,p=2*l-q;
+    r=hue2rgb(p,q,h+1/3);g=hue2rgb(p,q,h);b=hue2rgb(p,q,h-1/3);
+  }
+  return [Math.round(r*255),Math.round(g*255),Math.round(b*255)];
+}
+
+function drawDepthMap() {
+  const w = canvas.width, h = canvas.height;
+  if(!w||!h) return;
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
+  for(let y=0;y<h;y++) {
+    for(let x=0;x<w;x++) {
+      const nx=x/w, ny=y/h;
+      const depth =
+        0.4*Math.sin(nx*4+t*0.3) +
+        0.3*Math.cos(ny*3-t*0.2) +
+        0.2*Math.sin((nx+ny)*5+t*0.15) +
+        0.1*Math.sin(nx*ny*8+t*0.4);
+      const norm = (depth+1)/2;
+      // Jet colormap like depth maps
+      const hue = 0.67 - norm*0.67;
+      const [r,g,b] = hslToRgb(hue, 0.9, 0.4+norm*0.2);
+      const i=(y*w+x)*4;
+      d[i]=r; d[i+1]=g; d[i+2]=b; d[i+3]=70;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  t += 0.008;
+  requestAnimationFrame(drawDepthMap);
+}
+drawDepthMap();
+
+// ── Scroll reveal ─────────────────────────────────────────────────────
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('in'); });
+}, { threshold: 0.1 });
+reveals.forEach(el => observer.observe(el));
+
+// ── Score fills & counters ────────────────────────────────────────────
+const scoreObs = new IntersectionObserver(entries => {
   entries.forEach(e => {
-    if (e.isIntersecting) {
-      document.querySelectorAll('.bar-fill').forEach(b => {
-        b.style.width = b.dataset.w + '%';
-      });
-      barObserver.disconnect();
-    }
+    if(!e.isIntersecting) return;
+    const fills = e.target.querySelectorAll('.score-fill');
+    fills.forEach(f => { f.style.width = f.dataset.width + '%'; });
+    const bars = e.target.querySelectorAll('.bar-fill');
+    bars.forEach(b => { b.style.width = b.dataset.width + '%'; });
+    scoreObs.unobserve(e.target);
   });
-}, { threshold: 0.3 });
-barObserver.observe(document.getElementById('barChart'));
+}, { threshold: 0.2 });
+document.querySelectorAll('section').forEach(s => scoreObs.observe(s));
 
-// Copy citation
-function copyCitation() {
-  const text = document.getElementById('bibtex').innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    const btn = document.querySelector('.copy-btn');
-    btn.textContent = '✓ Copied!';
-    btn.style.color = 'var(--green)';
-    btn.style.borderColor = 'var(--green)';
-    setTimeout(() => { btn.textContent = 'Copy BibTeX'; btn.style.color=''; btn.style.borderColor=''; }, 2000);
+// ── Counter animation ─────────────────────────────────────────────────
+document.querySelectorAll('[data-count]').forEach(el => {
+  const io = new IntersectionObserver(entries => {
+    if(!entries[0].isIntersecting) return;
+    const target = parseFloat(el.dataset.count);
+    const suffix = el.dataset.suffix || '';
+    let start = 0, steps = 60;
+    const timer = setInterval(() => {
+      start++;
+      el.textContent = (target * start/steps).toFixed(target<1?3:2) + suffix;
+      if(start>=steps){ el.textContent = target+suffix; clearInterval(timer); }
+    }, 20);
+    io.disconnect();
+  }, {threshold:0.5});
+  io.observe(el);
+});
+
+// ── Tab switching ─────────────────────────────────────────────────────
+function switchTab(id, btn) {
+  document.querySelectorAll('.radi-tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.radi-panel').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-'+id).classList.add('active');
+}
+
+// ── REC scatter chart ─────────────────────────────────────────────────
+function drawRecChart() {
+  const c = document.getElementById('rec-chart');
+  if(!c) return;
+  const cx = c.getContext('2d');
+  const w=c.width, h=c.height;
+  cx.fillStyle='#070d1a'; cx.fillRect(0,0,w,h);
+  // axes
+  cx.strokeStyle='rgba(127,168,192,0.2)';
+  cx.beginPath(); cx.moveTo(40,10); cx.lineTo(40,h-30); cx.lineTo(w-10,h-30); cx.stroke();
+  // Labels
+  cx.fillStyle='#4a6f88'; cx.font='9px JetBrains Mono';
+  cx.fillText('Predicted Reliability →', 55, h-10);
+  cx.save(); cx.translate(12,h/2); cx.rotate(-Math.PI/2);
+  cx.fillText('|Error| (m) →', -30, 0); cx.restore();
+
+  // Scatter points
+  const pts=[];
+  for(let i=0;i<180;i++){
+    const rel=Math.random();
+    const err=Math.max(0, 0.35-0.3*rel + (Math.random()-0.5)*0.15);
+    pts.push([rel,err]);
+  }
+
+  pts.forEach(([rel,err])=>{
+    const px=42+(w-52)*rel;
+    const py=(h-32)-((h-52)*Math.min(err/0.6,1));
+    // color by reliability (jet)
+    const hue=0.67-rel*0.67;
+    cx.fillStyle=`hsla(${hue*360},80%,55%,0.6)`;
+    cx.beginPath(); cx.arc(px,py,2.5,0,Math.PI*2); cx.fill();
+  });
+
+  // trend line
+  cx.strokeStyle='rgba(0,220,200,0.7)'; cx.lineWidth=1.5;
+  cx.setLineDash([4,3]);
+  cx.beginPath(); cx.moveTo(42,h-75); cx.lineTo(w-15,60); cx.stroke();
+  cx.setLineDash([]);
+
+  cx.fillStyle='#00dcc8'; cx.font='bold 11px JetBrains Mono';
+  cx.fillText('ρ = +0.435 ***', w-110, 22);
+  cx.fillStyle='rgba(0,220,200,.15)'; cx.fillRect(w-115,8,107,17);
+}
+
+// ── RBS bar chart ─────────────────────────────────────────────────────
+function drawRbsChart() {
+  const c = document.getElementById('rbs-chart');
+  if(!c) return;
+  const cx = c.getContext('2d');
+  const w=c.width, h=c.height;
+  cx.fillStyle='#070d1a'; cx.fillRect(0,0,w,h);
+  const regions=['All','Edge','Textureless','Far-depth'];
+  const d0=[0.601,0.643,0.557,0.714];
+  const d1=[0.353,0.388,0.319,0.431];
+  const bw=38, gap=18, ox=35;
+  const maxV=0.8;
+
+  cx.fillStyle='#4a6f88'; cx.font='9px JetBrains Mono';
+  cx.fillText('RMSE (m)', ox, 14);
+
+  regions.forEach((r,i)=>{
+    const x=ox+i*(bw*2+gap);
+    const h0=((h-50)*d0[i]/maxV);
+    const h1=((h-50)*d1[i]/maxV);
+
+    // D0 bar
+    cx.fillStyle='rgba(255,122,53,0.6)';
+    cx.fillRect(x,h-30-h0,bw,h0);
+    // D1 bar
+    cx.fillStyle='rgba(0,220,200,0.7)';
+    cx.fillRect(x+bw,h-30-h1,bw,h1);
+
+    cx.fillStyle='#7fa8c0'; cx.font='8px JetBrains Mono';
+    cx.fillText(r, x, h-14);
+
+    // RBS label
+    const rbs=Math.round((d0[i]-d1[i])/d0[i]*100);
+    cx.fillStyle='#29e89c'; cx.font='bold 8px JetBrains Mono';
+    cx.fillText('+'+rbs+'%', x+4, h-30-h0-5);
+  });
+
+  // Legend
+  cx.fillStyle='rgba(255,122,53,0.7)'; cx.fillRect(ox,10,10,8);
+  cx.fillStyle='#7fa8c0'; cx.font='8px JetBrains Mono'; cx.fillText('D₀ coarse', ox+14, 18);
+  cx.fillStyle='rgba(0,220,200,0.7)'; cx.fillRect(ox+80,10,10,8);
+  cx.fillText('D₁ refined', ox+94, 18);
+}
+
+// ── CAL chart ─────────────────────────────────────────────────────────
+function drawCalChart() {
+  const c = document.getElementById('cal-chart');
+  if(!c) return;
+  const cx = c.getContext('2d');
+  const w=c.width, h=c.height;
+  cx.fillStyle='#070d1a'; cx.fillRect(0,0,w,h);
+
+  const bins=15;
+  const ox=35, oy=h-30, pw=w-50, ph=h-50;
+
+  // Perfect calibration diagonal
+  cx.strokeStyle='rgba(127,168,192,0.25)'; cx.lineWidth=1; cx.setLineDash([5,5]);
+  cx.beginPath(); cx.moveTo(ox,oy); cx.lineTo(ox+pw,oy-ph); cx.stroke();
+  cx.setLineDash([]);
+  cx.fillStyle='#4a6f88'; cx.font='8px JetBrains Mono';
+  cx.fillText('Perfect', ox+pw-40, oy-ph+12);
+
+  // Model reliability calibration (ECE=0.041)
+  cx.strokeStyle='rgba(0,220,200,0.8)'; cx.lineWidth=2;
+  cx.beginPath();
+  for(let i=0;i<=bins;i++){
+    const x=ox+pw*(i/bins);
+    const rel=i/bins;
+    const acc=rel*0.92+0.04*Math.sin(rel*Math.PI);
+    const y=oy-ph*acc;
+    i===0?cx.moveTo(x,y):cx.lineTo(x,y);
+  }
+  cx.stroke();
+
+  // Random predictor
+  cx.strokeStyle='rgba(255,69,96,0.5)'; cx.lineWidth=1.5; cx.setLineDash([3,4]);
+  cx.beginPath(); cx.moveTo(ox,oy-ph*0.5); cx.lineTo(ox+pw,oy-ph*0.5); cx.stroke();
+  cx.setLineDash([]);
+
+  // Axes
+  cx.strokeStyle='rgba(127,168,192,0.2)'; cx.lineWidth=1;
+  cx.beginPath(); cx.moveTo(ox,10); cx.lineTo(ox,oy); cx.lineTo(ox+pw,oy); cx.stroke();
+
+  cx.fillStyle='#4a6f88'; cx.font='8px JetBrains Mono';
+  cx.fillText('Predicted Reliability →', ox+pw/2-40, h-8);
+  cx.save(); cx.translate(12,h/2+20); cx.rotate(-Math.PI/2);
+  cx.fillText('Empirical Accuracy →', -30, 0); cx.restore();
+
+  // Legend
+  cx.fillStyle='rgba(0,220,200,0.8)';
+  cx.fillRect(ox+pw-100,15,12,2);
+  cx.fillStyle='#7fa8c0'; cx.font='8px JetBrains Mono';
+  cx.fillText('R³DC  ECE=0.041', ox+pw-85, 21);
+
+  cx.strokeStyle='rgba(255,69,96,0.5)'; cx.lineWidth=1.5; cx.setLineDash([3,4]);
+  cx.beginPath(); cx.moveTo(ox+pw-100,35); cx.lineTo(ox+pw-88,35); cx.stroke();
+  cx.setLineDash([]);
+  cx.fillStyle='#7fa8c0';
+  cx.fillText('Random ECE≈0.25', ox+pw-85, 39);
+}
+
+// ── Sparsity chart ────────────────────────────────────────────────────
+function drawSparsityChart() {
+  const c = document.getElementById('sparsity-chart');
+  if(!c) return;
+  const cx = c.getContext('2d');
+  const w=c.offsetWidth||300; c.width=w;
+  const h=140;
+  cx.fillStyle='#0d1628'; cx.fillRect(0,0,w,h);
+  const sparsity=[0.5,1,2,5,10,50];
+  const rmse=[2.31,1.82,1.43,0.92,0.73,0.56];
+  const ox=35,oy=h-25,pw=w-45,ph=h-35;
+  const maxR=2.5;
+
+  cx.strokeStyle='rgba(127,168,192,0.15)'; cx.lineWidth=1;
+  [0.5,1,1.5,2].forEach(v=>{
+    const y=oy-ph*(v/maxR);
+    cx.beginPath(); cx.moveTo(ox,y); cx.lineTo(ox+pw,y); cx.stroke();
+    cx.fillStyle='#4a6f88'; cx.font='8px JetBrains Mono';
+    cx.fillText(v+'m', 2, y+3);
+  });
+
+  cx.strokeStyle='rgba(0,220,200,0.8)'; cx.lineWidth=2;
+  cx.beginPath();
+  sparsity.forEach((s,i)=>{
+    const x=ox+pw*(i/5);
+    const y=oy-ph*(rmse[i]/maxR);
+    i===0?cx.moveTo(x,y):cx.lineTo(x,y);
+  });
+  cx.stroke();
+
+  cx.fillStyle='rgba(0,220,200,0.8)';
+  sparsity.forEach((s,i)=>{
+    const x=ox+pw*(i/5);
+    const y=oy-ph*(rmse[i]/maxR);
+    cx.beginPath(); cx.arc(x,y,3.5,0,Math.PI*2); cx.fill();
+    cx.fillStyle='#4a6f88'; cx.font='8px JetBrains Mono';
+    cx.fillText(s+'%', x-8, oy+12);
+    cx.fillStyle='rgba(0,220,200,0.8)';
+  });
+
+  cx.strokeStyle='rgba(127,168,192,0.2)'; cx.lineWidth=1;
+  cx.beginPath(); cx.moveTo(ox,10); cx.lineTo(ox,oy); cx.lineTo(ox+pw,oy); cx.stroke();
+  cx.fillStyle='#4a6f88'; cx.font='8px JetBrains Mono';
+  cx.fillText('Input density %', ox+pw/2-30, oy+22);
+}
+
+// ── Qualitative depth map visualizations ─────────────────────────────
+function drawDepthViz() {
+  const size = 200;
+  // RGB
+  const rgb = document.getElementById('viz-rgb');
+  if(!rgb) return;
+  const W = rgb.offsetWidth||200; rgb.width=W; rgb.height=120;
+  const rc = rgb.getContext('2d');
+  // Simulate a scene
+  const grad = rc.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0,'#1a2a4a'); grad.addColorStop(0.4,'#2a3a5a');
+  grad.addColorStop(0.7,'#3a4a7a'); grad.addColorStop(1,'#1a1a3a');
+  rc.fillStyle=grad; rc.fillRect(0,0,W,120);
+  // objects
+  rc.fillStyle='#667799'; rc.fillRect(20,40,60,60);
+  rc.fillStyle='#445566'; rc.fillRect(90,55,50,45);
+  rc.fillStyle='#334455'; rc.fillRect(150,35,40,65);
+  rc.fillStyle='rgba(255,255,255,0.08)'; rc.fillRect(0,0,W,30);
+
+  // Sparse
+  const sp = document.getElementById('viz-sparse');
+  sp.width=sp.offsetWidth||200; sp.height=120;
+  const sc=sp.getContext('2d');
+  sc.fillStyle='#0d1628'; sc.fillRect(0,0,sp.width,120);
+  for(let i=0;i<200;i++){
+    const x=Math.random()*sp.width, y=Math.random()*120;
+    const d=Math.random();
+    const h=0.67-d*0.67;
+    sc.fillStyle=`hsla(${h*360},90%,55%,0.9)`;
+    sc.fillRect(x,y,2,2);
+  }
+
+  // Pred
+  const pr = document.getElementById('viz-pred');
+  pr.width=pr.offsetWidth||200; pr.height=120;
+  const pc=pr.getContext('2d');
+  const img2=pc.createImageData(pr.width,120);
+  for(let y=0;y<120;y++) for(let x=0;x<pr.width;x++){
+    const nx=x/pr.width, ny=y/120;
+    let d=0.4+0.3*nx;
+    if(x>18&&x<82&&y>38&&y<102) d=0.3;
+    else if(x>88&&x<142&&y>53&&y<102) d=0.5;
+    else if(x>148&&x<192&&y>33&&y<102) d=0.7;
+    d+=0.05*(Math.random()-0.5);
+    d=Math.max(0,Math.min(1,d));
+    const hue=(0.67-d*0.67)*360;
+    const [r,g,b]=hslToRgb((0.67-d*0.67),0.9,0.5);
+    const i=(y*pr.width+x)*4;
+    img2.data[i]=r; img2.data[i+1]=g; img2.data[i+2]=b; img2.data[i+3]=255;
+  }
+  pc.putImageData(img2,0,0);
+
+  // Reliability
+  const rl = document.getElementById('viz-rel');
+  rl.width=rl.offsetWidth||200; rl.height=120;
+  const lc=rl.getContext('2d');
+  const img3=lc.createImageData(rl.width,120);
+  for(let y=0;y<120;y++) for(let x=0;x<rl.width;x++){
+    const nx=x/rl.width, ny=y/120;
+    let rel=0.8-0.3*Math.abs(nx-0.5);
+    // low near object boundaries
+    if((x>18&&x<24&&y>38&&y<102)||(x>76&&x<82&&y>38&&y<102)) rel=0.15;
+    if((x>88&&x<94&&y>53&&y<102)||(x>136&&x<142&&y>53&&y<102)) rel=0.2;
+    rel+=0.1*(Math.random()-0.5);
+    rel=Math.max(0,Math.min(1,rel));
+    // Red=low, Green=high
+    const r=Math.round((1-rel)*200), g2=Math.round(rel*200), b2=60;
+    const i=(y*rl.width+x)*4;
+    img3.data[i]=r; img3.data[i+1]=g2; img3.data[i+2]=b2; img3.data[i+3]=255;
+  }
+  lc.putImageData(img3,0,0);
+}
+
+// ── Copy bibtex ───────────────────────────────────────────────────────
+function copyBib() {
+  const text = document.getElementById('bibtex-content').textContent;
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn=document.querySelector('.copy-btn');
+    btn.textContent='Copied!'; btn.style.color='var(--green)';
+    setTimeout(()=>{ btn.textContent='Copy'; btn.style.color=''; }, 2000);
   });
 }
+
+// ── Init ──────────────────────────────────────────────────────────────
+window.addEventListener('load', ()=>{
+  setTimeout(()=>{
+    drawRecChart();
+    drawRbsChart();
+    drawCalChart();
+    drawSparsityChart();
+    drawDepthViz();
+  }, 200);
+});
+
+window.addEventListener('resize', ()=>{
+  drawSparsityChart();
+  drawDepthViz();
+});
 </script>
 </body>
 </html>
